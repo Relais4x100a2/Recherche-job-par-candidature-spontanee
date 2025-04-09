@@ -1,4 +1,7 @@
-#https://recherche-entreprises.api.gouv.fr/docs/#tag/Recherche-textuelle/paths/~1search/get 
+# https://recherche-entreprises.api.gouv.fr/docs/#tag/Recherche-textuelle/paths/~1search/get
+# 
+# https://adresse.data.gouv.fr/outils/api-doc/adresse
+#  
 import requests
 import json
 import openpyxl
@@ -63,8 +66,8 @@ def preparer_donnees_pour_excel_etablissements(entreprises):
         siren = entreprise.get('siren', 'N/A')
         nom_entreprise = entreprise.get('nom_raison_sociale', 'N/A')
         dirigeants = entreprise.get('dirigeants', [])
-        noms_dirigeants = ", ".join(
-            [f"{dirigeant.get('nom', 'N/A')} {dirigeant.get('prenoms', 'N/A')}".strip() for dirigeant in dirigeants])
+        noms_dirigeants = " | ".join(
+            [f"{dirigeant.get('denomination','')}{dirigeant.get('nom','')} {dirigeant.get('prenoms','')} - {dirigeant.get('qualite','')}".strip() for dirigeant in dirigeants])
 
         siege = entreprise.get('siege', {})
         adresse_siege = siege.get('adresse', 'N/A')
