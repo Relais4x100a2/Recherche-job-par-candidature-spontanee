@@ -1,12 +1,8 @@
-# https://recherche-entreprises.api.gouv.fr/docs/#tag/Recherche-textuelle/paths/~1search/get
-# 
-# https://adresse.data.gouv.fr/outils/api-doc/adresse
-#  
 import requests
 import json
-import openpyxl
 import pandas as pd
-from openpyxl.utils.dataframe import dataframe_to_rows
+import folium
+from geopy.geocoders import BANFrance
 
 def rechercher_entreprises_restauration_detaillees(departement, tranche_effectif):
     """
@@ -50,81 +46,139 @@ def rechercher_entreprises_restauration_detaillees(departement, tranche_effectif
     return entreprises_detaillees
 
 
-def preparer_donnees_pour_excel_etablissements(entreprises):
+def geocoder_ban_france(adresse):
     """
-    Prépare les données pour l'export Excel, une ligne par établissement.
+    Géocode une adresse en utilisant l'API de la Base Adresse Nationale (BAN) France.
+
+    Args:
+        adresse (str): L'adresse à géocoder.
+
+    Returns:
+        tuple or None: Un tuple contenant (latitude, longitude) si le géocodage réussit,
+                       None sinon.
+    """
+    geolocator = BANFrance(user_agent="mon_application_datawrangler")
+    try:
+        location = geolocator.geocode(adresse, exactly_one=True, timeout=10)
+        if location:
+            return location.latitude, location.longitude
+        else:
+            return None
+    except Exception as e:
+        print(f"Erreur de géocodage pour '{adresse}': {e}")
+        return None
+
+
+def preparer_donnees_pour_la_carte_datawrangler(entreprises):
+    """
+    Prépare les données pour l'affichage sur une carte et pour Data Wrangler,
+    en géocodant les adresses des établissements avec BANFrance si nécessaire,
+    et inclut le SIREN, le SIRET et les informations des dirigeants.
 
     Args:
         entreprises (list): Une liste d'informations détaillées sur les entreprises.
 
     Returns:
-        list: Une liste de dictionnaires représentant les établissements,
-              prêtes pour l'export Excel.
+        pandas.DataFrame: Un DataFrame contenant le SIREN, le SIRET, le nom de
+                          l'entreprise, l'adresse de l'établissement, la latitude,
+                          la longitude et le dictionnaire des dirigeants.
     """
-    etablissements_pour_excel = []
+    data = []
     for entreprise in entreprises:
         siren = entreprise.get('siren', 'N/A')
+        nom_complet = entreprise.get('nom_complet', 'N/A')
         nom_entreprise = entreprise.get('nom_raison_sociale', 'N/A')
+        nombre_etablissements = entreprise.get('nombre_etablissements', 0)
+        nombre_etablissements_ouverts = entreprise.get('nombre_etablissements_ouverts', 0)
         dirigeants = entreprise.get('dirigeants', [])
-        noms_dirigeants = " | ".join(
-            [f"{dirigeant.get('denomination','')}{dirigeant.get('nom','')} {dirigeant.get('prenoms','')} - {dirigeant.get('qualite','')}".strip() for dirigeant in dirigeants])
-
-        siege = entreprise.get('siege', {})
-        adresse_siege = siege.get('adresse', 'N/A')
-        latitude_siege = siege.get('latitude', 'N/A')
-        longitude_siege = siege.get('longitude', 'N/A')
-
         finances = entreprise.get('finances', {})
-        finance_annee = str(list(finances.keys())[0]) if finances and finances.keys() else 'N/A'
-        ca = str(finances.get(finance_annee, {}).get('ca', 'N/A')) if finances and finances.get(finance_annee, {}) else 'N/A'
-        resultat_net = str(finances.get(finance_annee, {}).get('resultat_net', 'N/A')) if finances and finances.get(finance_annee, {}) else 'N/A'
-
         matching_etablissements = entreprise.get('matching_etablissements', [])
         for etablissement in matching_etablissements:
-            etablissement_info_excel = {
-                'SIREN': siren,
-                'Nom Entreprise': nom_entreprise,
-                'Dirigeants': noms_dirigeants,
-                'Adresse Siège': adresse_siege,
-                'Latitude Siège': latitude_siege,
-                'Longitude Siège': longitude_siege,
-                'Adresse Etablissement': etablissement.get('adresse', 'N/A'),
-                'Activité Principale Etablissement': etablissement.get('activite_principale', 'N/A'),
-                'Année CA/Résultat': finance_annee,
-                'Chiffre d\'affaires': ca,
-                'Résultat Net': resultat_net
-            }
-            etablissements_pour_excel.append(etablissement_info_excel)
+            siret = etablissement.get('siret', 'N/A')
+            adresse = etablissement.get('adresse_etablissement', etablissement.get('adresse', 'N/A'))
+            latitude = etablissement.get('latitude')
+            longitude = etablissement.get('longitude')
 
-    return etablissements_pour_excel
+            if latitude is not None and longitude is not None:
+                data.append({
+                    'SIREN': siren,
+                    'Nombre etablissements': nombre_etablissements,
+                    'dont ouverts': nombre_etablissements_ouverts,
+                    'SIRET': siret,
+                    'Dénomination sociale': nom_entreprise,
+                    'Nom complet': nom_complet,
+                    'Adresse': adresse,
+                    'Latitude': latitude,
+                    'Longitude': longitude,
+                    'Dirigeants': dirigeants,
+                    "Finances": finances
+                })
+            else:
+                coordonnees = geocoder_ban_france(adresse)
+                if coordonnees:
+                    data.append({
+                        'SIREN': siren,
+                        'Nombre etablissements': nombre_etablissements,
+                        'dont ouverts': nombre_etablissements_ouverts,
+                        'SIRET': siret,
+                        'Dénomination sociale': nom_entreprise,
+                        'Nom complet': nom_complet,
+                        'Adresse': adresse,
+                        'Latitude': coordonnees[0],
+                        'Longitude': coordonnees[1],
+                        'Dirigeants': dirigeants,
+                        "Finances": finances
+                    })
+                else:
+                    print(f"Impossible de géocoder l'établissement : {adresse}")
+    return pd.DataFrame(data)
 
 
-def exporter_vers_excel(data, nom_fichier="entreprises_restauration.xlsx"):
+def generer_carte_html(df_etablissements, nom_fichier_html="carte_restauration.html", departement="France"):
     """
-    Exporte les données vers un fichier Excel, une ligne par établissement.
+    Génère un fichier HTML contenant une carte interactive des établissements.
 
     Args:
-        data (list): Une liste de dictionnaires représentant les établissements.
-        nom_fichier (str): Le nom du fichier Excel à créer.
+        df_etablissements (pandas.DataFrame): DataFrame contenant les informations
+                                               des établissements (Nom, Adresse, Latitude, Longitude).
+        nom_fichier_html (str): Le nom du fichier HTML à créer.
+        departement (str): Le nom du pays ou d'une région pour centrer initialement la carte.
     """
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Etablissements"  # Nom de la feuille
-
-    # Créer les en-têtes
-    headers = list(data[0].keys()) if data else []
-    ws.append(headers)
-
-    # Ajouter les données
-    for etablissement in data:
-        row = list(etablissement.values())
-        ws.append(row)
-
+    geolocator = BANFrance(user_agent="mon_application_datawrangler_carte")
     try:
-        wb.save(nom_fichier)
-        print(f"\nLes données ont été exportées vers le fichier Excel : {nom_fichier}")
+        location_departement = geolocator.geocode(departement, exactly_one=True, timeout=10)
+        if location_departement:
+            latitude_centre = location_departement.latitude
+            longitude_centre = location_departement.longitude
+            m = folium.Map(location=[latitude_centre, longitude_centre], zoom_start=9)
+        else:
+            print(f"Impossible de géolocaliser '{departement}', centrage de la carte par défaut.")
+            m = folium.Map(location=[46.2276, 2.2137], zoom_start=5)  # Centre de la France par défaut
     except Exception as e:
-        print(f"Erreur lors de l'enregistrement du fichier Excel : {e}")
+        print(f"Erreur lors de la géolocalisation du département '{departement}': {e}")
+        m = folium.Map(location=[46.2276, 2.2137], zoom_start=5)  # Centre de la France par défaut
+
+    for index, row in df_etablissements.iterrows():
+        if pd.notna(row['Latitude']) and pd.notna(row['Longitude']):
+            folium.Marker([row['Latitude'], row['Longitude']], popup=f"{row['Nom complet']} (SIRET: {row['SIRET']})").add_to(m)
+
+    m.save(nom_fichier_html)
+    print(f"\nCarte interactive sauvegardée dans : {nom_fichier_html}")
+
+
+def enregistrer_dataframe_csv(df, nom_fichier_csv="etablissements_carte.csv"):
+    """
+    Enregistre le DataFrame dans un fichier CSV.
+
+    Args:
+        df (pandas.DataFrame): Le DataFrame à enregistrer.
+        nom_fichier_csv (str): Le nom du fichier CSV à créer.
+    """
+    try:
+        df.to_csv(nom_fichier_csv, index=False, encoding='utf-8')
+        print(f"\nDataFrame des établissements sauvegardé dans : {nom_fichier_csv}")
+    except Exception as e:
+        print(f"Erreur lors de l'enregistrement du DataFrame au format CSV : {e}")
 
 
 if __name__ == "__main__":
@@ -137,10 +191,15 @@ if __name__ == "__main__":
                                                                                     tranches_effectif_recherche)
     print(f"{len(entreprises_detaillees_trouvees)} entreprises trouvées.")
 
-    print("\nPréparation des données pour l'export Excel (une ligne par établissement)...")
-    etablissements_pour_excel = preparer_donnees_pour_excel_etablissements(entreprises_detaillees_trouvees)
+    print("\nPréparation des données pour la carte et Data Wrangler (géocodage des adresses)...")
+    df_etablissements_carte = preparer_donnees_pour_la_carte_datawrangler(entreprises_detaillees_trouvees)
+    print(f"\n{len(df_etablissements_carte)} établissements prêts pour la carte et Data Wrangler.")
+    print(df_etablissements_carte.head())
 
-    print("\nExportation vers Excel...")
-    exporter_vers_excel(etablissements_pour_excel)
+    print("\nCréation et sauvegarde de la carte HTML...")
+    generer_carte_html(df_etablissements_carte, departement=f"France, {departement_recherche}")
+
+    print("\nEnregistrement du DataFrame au format CSV...")
+    enregistrer_dataframe_csv(df_etablissements_carte)
 
     print("\nScript terminé.")
