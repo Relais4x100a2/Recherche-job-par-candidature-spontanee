@@ -1,5 +1,4 @@
 import requests
-import json
 import pandas as pd
 import folium
 from geopy.geocoders import BANFrance
