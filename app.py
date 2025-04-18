@@ -415,7 +415,7 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
 
 
 # --- Interface Streamlit ---
-st.title("🔎 Recherche d'entreprises pour candidatures spontannées")
+st.title("🔎 Recherche d'entreprises pour candidatures spontanées")
 st.markdown("Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés.")
 
 # --- Zone de saisie des paramètres ---
