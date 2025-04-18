@@ -1,3 +1,5 @@
-click
+streamlit
 requests
-terminaltables
+pandas
+geopy
+pydeck
