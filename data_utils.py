@@ -7,6 +7,7 @@ from io import BytesIO
 # Removed: import openpyxl - pandas uses it via ExcelWriter, direct use not strictly needed if formulas written via pandas/xlsxwriter methods
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import Font, PatternFill, Alignment # Added for styling
 import numpy as np # For pd.NA if used
 
 # Importer la configuration
@@ -332,6 +333,53 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
                     adjusted_width = (max_length + 2) * 1.2 
                     adjusted_width = min(adjusted_width, 60) # Cap max width
                     sheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # 8. Styling Headers
+            header_font = Font(bold=True, color="FFFFFFFF") # White
+            header_fill = PatternFill(start_color="FF4472C4", end_color="FF4472C4", fill_type="solid") # Medium Blue
+            header_alignment = Alignment(horizontal="center", vertical="center")
+
+            sheets_to_style_headers = ['ENTREPRISES', 'CONTACTS', 'ACTIONS', 'VALEURS_LISTE']
+            for sheet_name in sheets_to_style_headers:
+                if sheet_name in workbook.sheetnames:
+                    sheet = workbook[sheet_name]
+                    for cell in sheet[1]: # Iterate through cells in the first row
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+            
+            # 9. Hide DATA_IMPORT sheet
+            if 'DATA_IMPORT' in workbook.sheetnames:
+                ws_data_import = workbook['DATA_IMPORT']
+                ws_data_import.sheet_state = 'hidden'
+
+            # 10. Set Sheet Order
+            # Desired order of visible sheets, DATA_IMPORT will be last among (potentially) visible then hidden
+            # The actual creation order was: DATA_IMPORT, ENTREPRISES, VALEURS_LISTE, CONTACTS, ACTIONS
+            # New desired order: ENTREPRISES, CONTACTS, ACTIONS, VALEURS_LISTE, (DATA_IMPORT hidden)
+            
+            # Get all sheet titles currently in the workbook
+            current_sheet_titles = [sheet.title for sheet in workbook._sheets]
+
+            # Define the desired visible order
+            desired_visible_order = ['ENTREPRISES', 'CONTACTS', 'ACTIONS', 'VALEURS_LISTE']
+            
+            final_ordered_sheets = []
+            # Add sheets in the desired visible order
+            for title in desired_visible_order:
+                if title in current_sheet_titles:
+                    final_ordered_sheets.append(workbook[title])
+            
+            # Add any other sheets that are not in the desired visible list (e.g., DATA_IMPORT or others)
+            # This ensures all sheets are kept, with DATA_IMPORT being effectively at the end or wherever it lands
+            # after the specified visible ones.
+            for title in current_sheet_titles:
+                if title not in desired_visible_order:
+                    final_ordered_sheets.append(workbook[title])
+            
+            workbook._sheets = final_ordered_sheets
+
+
         # End of `with pd.ExcelWriter` block, writer is saved here.
     except Exception as e:
         st.error(f"Une erreur est survenue lors de la génération du fichier Excel : {e}")
