@@ -58,14 +58,32 @@ size_mapping = {
 # --- Colonnes pour l'affichage et l'export ---
 COLS_DISPLAY_TABLE = [
     'SIRET', 'Nom complet', 'Enseignes', 'Est siège social', 'Adresse établissement',
-    'Activité NAF/APE', 'Nb salariés établissement', 'Année nb salariés établissement',
-    'Date de création', 'Chiffre d\'Affaires', 'Résultat Net', 'Année Finances'
+    'Activité NAF/APE Etablissement',
+    'Activité NAF/APE Entreprise',
+    'Nb salariés établissement', 'Année nb salariés établissement',
+    'Date de création Entreprise',
+    'Chiffre d\'Affaires Entreprise',
+    'Résultat Net Entreprise',
+    'Année Finances Entreprise'
 ]
 
 COLS_EXPORT_ORDER = [
-    'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE', 'Code NAF', 'Est siège social', 'Adresse établissement',
+    'SIRET', 'Nom complet', 'Enseignes',
+    'Activité NAF/APE Etablissement',
+    'code_naf_etablissement',
+    'Activité NAF/APE Entreprise',
+    'code_naf_entreprise',
+    'Est siège social', 'Adresse établissement',
     'Nb salariés établissement', 'Année nb salariés établissement', 'Code effectif établissement',
-    'SIREN', 'Raison sociale', 'Date de création', 'Nb total établissements ouverts',
-    'Nb salariés entreprise', 'Année Finances', 'Chiffre d\'Affaires', 'Résultat Net',
-    'Latitude', 'Longitude', 'Section NAF', 'Color', 'Radius'
+    'SIREN', 'Raison sociale',
+    'Date de création Entreprise',
+    'Nb total établissements ouverts',
+    'Nb salariés entreprise',
+    'Année Finances Entreprise',
+    'Chiffre d\'Affaires Entreprise',
+    'Résultat Net Entreprise',
+    'Latitude', 'Longitude', 'Section NAF', # Section NAF est basé sur code_naf_etablissement
+    # 'Color', 'Radius' # Color and Radius are primarily for map display, maybe not essential in general export
+    # Decided to keep Color and Radius for now as they were in the original list.
+    'Color', 'Radius'
 ]

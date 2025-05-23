@@ -183,18 +183,21 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
     df_filtered = pd.DataFrame(all_etablissements_data)
 
     # Enrichissement des données
-    df_filtered['Code NAF'] = df_filtered['code_naf_etablissement'].fillna(df_filtered['code_naf_entreprise']).astype(str)
-    df_filtered['Activité NAF/APE'] = df_filtered['Code NAF'].apply(lambda x: correspondance_NAF(x) if pd.notna(x) and x != 'nan' else 'N/A')
+    # df_filtered['Code NAF'] = df_filtered['code_naf_etablissement'].fillna(df_filtered['code_naf_entreprise']).astype(str)
+    # df_filtered['Activité NAF/APE'] = df_filtered['Code NAF'].apply(lambda x: correspondance_NAF(x) if pd.notna(x) and x != 'nan' else 'N/A')
+    df_filtered['Activité NAF/APE Entreprise'] = df_filtered['code_naf_entreprise'].apply(lambda x: correspondance_NAF(x) if pd.notna(x) and x != 'nan' else 'N/A')
+    df_filtered['Activité NAF/APE Etablissement'] = df_filtered['code_naf_etablissement'].apply(lambda x: correspondance_NAF(x) if pd.notna(x) and x != 'nan' else 'N/A')
     df_filtered['Nb salariés établissement'] = df_filtered['tranche_effectif_salarie_etablissement'].map(config.effectifs_tranches).fillna('N/A')
-    df_filtered['Section NAF'] = df_filtered['Code NAF'].apply(get_section_for_code).fillna('N/A')
+    # Utiliser code_naf_etablissement pour Section NAF, couleur et radius car plus spécifique à l'établissement affiché
+    df_filtered['Section NAF'] = df_filtered['code_naf_etablissement'].apply(get_section_for_code).fillna('N/A')
     df_filtered['Color'] = df_filtered['Section NAF'].apply(lambda section: config.naf_color_mapping.get(section, config.naf_color_mapping['N/A']))
     df_filtered['Radius'] = df_filtered['tranche_effectif_salarie_etablissement'].map(config.size_mapping).fillna(config.size_mapping.get('N/A', 10))
 
     # Conversion numérique et gestion des erreurs
     df_filtered['Latitude'] = pd.to_numeric(df_filtered['latitude'], errors='coerce')
     df_filtered['Longitude'] = pd.to_numeric(df_filtered['longitude'], errors='coerce')
-    df_filtered['Chiffre d\'Affaires'] = pd.to_numeric(df_filtered['ca_entreprise'], errors='coerce')
-    df_filtered['Résultat Net'] = pd.to_numeric(df_filtered['resultat_net_entreprise'], errors='coerce')
+    df_filtered['Chiffre d\'Affaires Entreprise'] = pd.to_numeric(df_filtered['ca_entreprise'], errors='coerce')
+    df_filtered['Résultat Net Entreprise'] = pd.to_numeric(df_filtered['resultat_net_entreprise'], errors='coerce')
 
     # Formatage des listes (enseignes)
     df_filtered['Enseignes'] = df_filtered['liste_enseignes'].apply(lambda x: ', '.join(x) if isinstance(x, list) and x else 'N/A')
@@ -207,10 +210,12 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
         'tranche_effectif_salarie_etablissement': 'Code effectif établissement',
         'annee_tranche_effectif_salarie': 'Année nb salariés établissement',
         'nom_sociale_entreprise': 'Raison sociale',
-        'date_creation_entreprise': 'Date de création',
+        'date_creation_entreprise': 'Date de création Entreprise',
         'nb_etab_ouverts_entreprise': 'Nb total établissements ouverts',
         'tranche_desc_entreprise': 'Nb salariés entreprise',
-        'annee_finances': 'Année Finances',
+        'annee_finances': 'Année Finances Entreprise',
+        # Les colonnes 'Chiffre d\'Affaires Entreprise' et 'Résultat Net Entreprise'
+        # sont déjà correctement nommées et n'ont pas besoin d'être dans rename()
     })
 
     # Garder seulement les colonnes existantes dans l'ordre défini par config
@@ -232,9 +237,14 @@ def generate_crm_excel(df_entreprises):
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         # --- Feuille 1: Entreprises ---
         cols_crm_entreprises = [
-            'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE', 'Code NAF',
+        'SIRET', 'Nom complet', 'Enseignes',
+        'Activité NAF/APE Etablissement',  # Modifié
+        'code_naf_etablissement', # Pour garder le code brut si besoin, renommé plus bas si nécessaire ou utilisé direct
+        'Activité NAF/APE Entreprise', # Ajouté
+        'code_naf_entreprise', # Pour garder le code brut si besoin
             'Adresse établissement', 'Nb salariés établissement', 'Est siège social',
-            'Date de création', 'Chiffre d\'Affaires', 'Résultat Net', 'Année Finances', 'SIREN'
+        'Date de création Entreprise', 'Chiffre d\'Affaires Entreprise',
+        'Résultat Net Entreprise', 'Année Finances Entreprise', 'SIREN'
         ]
         # Sélectionner et réorganiser les colonnes pertinentes
         df_crm_entreprises = df_entreprises[[col for col in cols_crm_entreprises if col in df_entreprises.columns]].copy()
