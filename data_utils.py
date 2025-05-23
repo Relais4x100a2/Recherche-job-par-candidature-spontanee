@@ -2,10 +2,10 @@
 import streamlit as st
 import pandas as pd
 from functools import lru_cache
-import datetime 
-from io import BytesIO # Nécessaire pour l'export Excel en mémoire
-from openpyxl import Workbook # Bien que pandas utilise openpyxl, l'importer peut aider pour des manips avancées si besoin
-from openpyxl.worksheet.datavalidation import DataValidation # Pour les listes déroulantes et restrictions
+import datetime
+from io import BytesIO
+import openpyxl # Importer openpyxl pour charger le template
+from openpyxl.worksheet.datavalidation import DataValidation
 
 
 # Importer la configuration
@@ -228,112 +228,185 @@ def generate_crm_excel(df_entreprises):
     pour le suivi CRM, incluant la validation des données.
 
     Args:
-        df_entreprises (pd.DataFrame): Le DataFrame des résultats de recherche (après traitement).
+        df_entreprises (pd.DataFrame): Le DataFrame des résultats de recherche.
 
     Returns:
-        bytes: Le contenu binaire du fichier Excel.
+        bytes: Le contenu binaire du fichier Excel, ou None en cas d'erreur.
     """
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # --- Feuille 1: Entreprises ---
-        cols_crm_entreprises = [
-        'SIRET', 'Nom complet', 'Enseignes',
-        'Activité NAF/APE Etablissement',  # Modifié
-        'code_naf_etablissement', # Pour garder le code brut si besoin, renommé plus bas si nécessaire ou utilisé direct
-        'Activité NAF/APE Entreprise', # Ajouté
-        'code_naf_entreprise', # Pour garder le code brut si besoin
+    template_path = "suivi_canditatures_spontanees.xlsx"
+    try:
+        workbook = openpyxl.load_workbook(template_path)
+    except FileNotFoundError:
+        st.error(f"Erreur: Le fichier template '{template_path}' est introuvable.")
+        return None
+    except Exception as e:
+        st.error(f"Erreur lors du chargement du template Excel: {e}")
+        return None
+
+    try:
+        # Accéder à la feuille "Data_Import"
+        sheet_name = "Data_Import"
+        if sheet_name in workbook.sheetnames:
+            ws = workbook[sheet_name]
+        else:
+            st.error(f"Erreur: La feuille '{sheet_name}' est introuvable dans le template.")
+            # Optionnel: créer la feuille si elle n'existe pas
+            # ws = workbook.create_sheet(sheet_name)
+            # st.warning(f"La feuille '{sheet_name}' n'existait pas et a été créée.")
+            return None # Ou gérer autrement
+
+        # Effacer les données existantes à partir de la deuxième ligne
+        # ws.max_row donne le nombre total de lignes ayant du contenu.
+        # ws.min_row est généralement 1.
+        # Il faut faire attention si la feuille est complètement vide ou n'a que des en-têtes.
+        if ws.max_row > 1: # S'il y a des données au-delà de la première ligne
+            # La suppression de lignes peut être lente et complexe avec openpyxl.
+            # Il est souvent plus simple de supprimer les lignes en itérant à l'envers
+            # ou de recréer la feuille ou d'écrire des cellules vides.
+            # Pour l'instant, on va juste écraser les cellules nécessaires.
+            # On va effacer en écrasant avec None jusqu'à la dernière ligne utilisée,
+            # puis on ajoutera les nouvelles données.
+            for row_idx in range(2, ws.max_row + 1):
+                for col_idx in range(1, ws.max_column + 1):
+                    ws.cell(row=row_idx, column=col_idx).value = None
+        
+        # Définir les en-têtes attendus/à écrire
+        headers = [
+            'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE Etablissement',
+            'code_naf_etablissement', 'Activité NAF/APE Entreprise', 'code_naf_entreprise',
             'Adresse établissement', 'Nb salariés établissement', 'Est siège social',
-        'Date de création Entreprise', 'Chiffre d\'Affaires Entreprise',
-        'Résultat Net Entreprise', 'Année Finances Entreprise', 'SIREN'
+            'Date de création Entreprise', 'Chiffre d\'Affaires Entreprise',
+            'Résultat Net Entreprise', 'Année Finances Entreprise', 'SIREN'
         ]
-        # Sélectionner et réorganiser les colonnes pertinentes
-        df_crm_entreprises = df_entreprises[[col for col in cols_crm_entreprises if col in df_entreprises.columns]].copy()
-        df_crm_entreprises.to_excel(writer, sheet_name='Entreprises', index=False, freeze_panes=(1, 0)) # Freeze top row
 
-        # --- Feuille 2: Contacts (Vide, prête à remplir) ---
-        cols_contacts = [
-            'ID Contact', 'Prénom', 'Nom', 'Poste', 'Email', 'Téléphone',
-            'LinkedIn URL', 'SIRET Entreprise', 'Notes'
-        ]
-        df_contacts = pd.DataFrame(columns=cols_contacts)
-        df_contacts.to_excel(writer, sheet_name='Contacts', index=False, freeze_panes=(1, 0))
+        # Vérifier si les en-têtes sont présents, sinon les écrire
+        # Ou simplement les réécrire pour s'assurer qu'ils sont corrects
+        for col_num, header_text in enumerate(headers, 1):
+            ws.cell(row=1, column=col_num, value=header_text)
 
-        # --- Feuille 3: Actions (Vide, prête à remplir) ---
-        cols_actions = [
-            'ID Action', 'Date Action', 'SIRET Entreprise', 'ID Contact',
-            'Type Action', 'Statut', 'Description/Notes'
-        ]
-        df_actions = pd.DataFrame(columns=cols_actions)
-        df_actions.to_excel(writer, sheet_name='Actions', index=False, freeze_panes=(1, 0))
+        # Préparer le DataFrame pour l'écriture
+        # S'assurer que seules les colonnes nécessaires sont présentes et dans le bon ordre
+        df_to_write = df_entreprises.copy()
+
+        # Mapper les noms de colonnes du DataFrame aux noms d'en-tête Excel si nécessaire
+        # Ici, on suppose que les noms de colonnes de df_entreprises correspondent
+        # aux `headers` après le renommage effectué dans `traitement_reponse_api`.
+        # Si ce n'est pas le cas, un mappage explicite serait nécessaire ici.
+        # Par exemple: df_to_write = df_entreprises.rename(columns={'AncienNom': 'NouveauNom'})
+
+        # Filtrer df_to_write pour ne garder que les colonnes définies dans headers
+        # et dans le bon ordre.
+        # Les colonnes non présentes dans df_entreprises seront ignorées silencieusement par reindex,
+        # ou on peut ajouter une gestion d'erreur si certaines sont critiques.
+        df_to_write = df_to_write.reindex(columns=headers)
+
+        # Écrire les données du DataFrame dans la feuille
+        # openpyxl.utils.dataframe.dataframe_to_rows est pratique mais sans formatage.
+        # On va itérer pour plus de contrôle si besoin plus tard.
+        current_row = 2 # Commencer à écrire à la deuxième ligne
+        for _, row_data in df_to_write.iterrows():
+            for col_num, header_name in enumerate(headers, 1):
+                cell_value = row_data.get(header_name)
+                # Gérer les types de données si nécessaire (ex: dates, nombres)
+                # Pour l'instant, on écrit directement.
+                ws.cell(row=current_row, column=col_num, value=cell_value)
+            current_row += 1
 
         # --- Ajout de la Validation des Données ---
-        workbook = writer.book
-        ws_entreprises = workbook['Entreprises']
-        ws_contacts = workbook['Contacts']
-        ws_actions = workbook['Actions']
+        max_row_validation = 5000 # Max row for applying data validation dropdowns
 
-        max_row_excel = 1048576 # Limite Excel pour les plages de validation
+        # Define formulas for data validation lists
+        company_list_formula = f"=Entreprises!$B$2:$B${max_row_validation}"
+        contact_list_formula = f"=Contacts!$A$2:$A${max_row_validation}"
+        vl_contacts_direction_formula = f"=Valeurs_Liste!$A$2:$A${max_row_validation}"
+        vl_actions_type_formula = f"=Valeurs_Liste!$B$2:$B${max_row_validation}"
+        vl_actions_statut_formula = f"=Valeurs_Liste!$C$2:$C${max_row_validation}"
+        vl_actions_opportunite_formula = f"=Valeurs_Liste!$D$2:$D${max_row_validation}"
 
-        # 1. Validation SIRET dans Contacts (colonne H si l'ordre est respecté)
-        if not df_crm_entreprises.empty:
-            siret_list_formula = f"=Entreprises!$A$2:$A${len(df_crm_entreprises) + 1}"
-            dv_siret_contact = DataValidation(type="list", formula1=siret_list_formula, allow_blank=True)
-            dv_siret_contact.error = "Le SIRET doit provenir de la feuille 'Entreprises'."
-            dv_siret_contact.errorTitle = 'SIRET Invalide'
-            dv_siret_contact.prompt = "Choisissez un SIRET dans la liste"
-            dv_siret_contact.promptTitle = 'SIRET Entreprise'
-            # Appliquer à la colonne H (SIRET Entreprise) de la feuille Contacts
-            ws_contacts.add_data_validation(dv_siret_contact)
-            dv_siret_contact.add(f'H2:H{max_row_excel}') # Appliquer à toute la colonne à partir de la ligne 2
+        # Apply validations to 'Contacts' sheet
+        if "Contacts" in workbook.sheetnames:
+            ws_contacts = workbook["Contacts"]
 
-            # 2. Validation SIRET dans Actions (colonne C)
-            dv_siret_action = DataValidation(type="list", formula1=siret_list_formula, allow_blank=True)
-            dv_siret_action.error = "Le SIRET doit provenir de la feuille 'Entreprises'."
-            dv_siret_action.errorTitle = 'SIRET Invalide'
-            dv_siret_action.prompt = "Choisissez un SIRET dans la liste"
-            dv_siret_action.promptTitle = 'SIRET Entreprise'
-            ws_actions.add_data_validation(dv_siret_action)
-            dv_siret_action.add(f'C2:C{max_row_excel}')
+            # Rule 1: Contacts Sheet, Column B (Company Name)
+            dv_company_contacts = DataValidation(type="list", formula1=company_list_formula, allow_blank=True)
+            dv_company_contacts.error = "Veuillez choisir une entreprise de la liste (Feuille Entreprises)."
+            dv_company_contacts.errorTitle = "Entreprise Invalide"
+            dv_company_contacts.prompt = "Sélectionnez une entreprise"
+            dv_company_contacts.promptTitle = "Entreprise"
+            ws_contacts.add_data_validation(dv_company_contacts)
+            dv_company_contacts.add(f"B2:B{max_row_validation}")
 
-        # 3. Validation ID Contact dans Actions (colonne D) - Attention: se base sur ce que l'utilisateur remplira
-        # On crée la règle, mais elle ne sera utile que si l'utilisateur remplit les ID Contacts
-        contact_id_list_formula = f"=Contacts!$A$2:$A${max_row_excel}" # Prend toute la colonne A de Contacts
-        dv_contact_id_action = DataValidation(type="list", formula1=contact_id_list_formula, allow_blank=True)
-        dv_contact_id_action.error = "L'ID Contact doit provenir de la feuille 'Contacts'."
-        dv_contact_id_action.errorTitle = 'ID Contact Invalide'
-        dv_contact_id_action.prompt = "Choisissez un ID Contact dans la liste (si applicable)"
-        dv_contact_id_action.promptTitle = 'ID Contact'
-        ws_actions.add_data_validation(dv_contact_id_action)
-        dv_contact_id_action.add(f'D2:D{max_row_excel}')
+            # Rule 2: Contacts Sheet, Column D (Direction)
+            dv_direction_contacts = DataValidation(type="list", formula1=vl_contacts_direction_formula, allow_blank=True)
+            dv_direction_contacts.error = "Veuillez choisir une direction depuis Valeurs_Liste."
+            dv_direction_contacts.errorTitle = "Direction Invalide"
+            dv_direction_contacts.prompt = "Sélectionnez une direction"
+            dv_direction_contacts.promptTitle = "Direction"
+            ws_contacts.add_data_validation(dv_direction_contacts)
+            dv_direction_contacts.add(f"D2:D{max_row_validation}")
+        else:
+            st.warning("Feuille 'Contacts' non trouvée. Certaines validations de données n'ont pas été appliquées.")
 
-        # 4. Listes déroulantes pour Type Action et Statut dans Actions (colonnes E et F)
-        type_action_list = '"Candidature envoyée,Relance téléphonique,Relance email,Entretien RH,Entretien technique,Entretien manager,Proposition,Refus,Acceptation,Autre"'
-        dv_type_action = DataValidation(type="list", formula1=type_action_list, allow_blank=True)
-        dv_type_action.prompt = "Choisissez un type d'action"
-        dv_type_action.promptTitle = 'Type Action'
-        ws_actions.add_data_validation(dv_type_action)
-        dv_type_action.add(f'E2:E{max_row_excel}')
+        # Apply validations to 'Actions' sheet
+        if "Actions" in workbook.sheetnames:
+            ws_actions = workbook["Actions"]
 
-        statut_action_list = '"À faire,En cours,Terminé,En attente,Annulé"'
-        dv_statut_action = DataValidation(type="list", formula1=statut_action_list, allow_blank=True)
-        dv_statut_action.prompt = "Choisissez un statut"
-        dv_statut_action.promptTitle = 'Statut'
-        ws_actions.add_data_validation(dv_statut_action)
-        dv_statut_action.add(f'F2:F{max_row_excel}')
+            # Rule 1: Actions Sheet, Column A (Company Name)
+            dv_company_actions = DataValidation(type="list", formula1=company_list_formula, allow_blank=True)
+            dv_company_actions.error = "Veuillez choisir une entreprise de la liste (Feuille Entreprises)."
+            dv_company_actions.errorTitle = "Entreprise Invalide"
+            dv_company_actions.prompt = "Sélectionnez une entreprise"
+            dv_company_actions.promptTitle = "Entreprise"
+            ws_actions.add_data_validation(dv_company_actions)
+            dv_company_actions.add(f"A2:A{max_row_validation}")
 
-        # Ajuster la largeur des colonnes (optionnel mais améliore la lisibilité)
-        for sheet in [ws_entreprises, ws_contacts, ws_actions]:
-            for col in sheet.columns:
-                max_length = 0
-                column = col[0].column_letter # Get the column name
-                for cell in col:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = (max_length + 2) * 1.2
-                sheet.column_dimensions[column].width = min(adjusted_width, 50) # Limiter la largeur max
+            # Rule 2: Actions Sheet, Column B (Contact Name)
+            dv_contact_actions = DataValidation(type="list", formula1=contact_list_formula, allow_blank=True)
+            dv_contact_actions.error = "Veuillez choisir un contact de la liste (Feuille Contacts)."
+            dv_contact_actions.errorTitle = "Contact Invalide"
+            dv_contact_actions.prompt = "Sélectionnez un contact"
+            dv_contact_actions.promptTitle = "Contact"
+            ws_actions.add_data_validation(dv_contact_actions)
+            dv_contact_actions.add(f"B2:B{max_row_validation}")
 
-    # Le writer est fermé automatiquement ici, le buffer est prêt
-    return output.getvalue()
+            # Rule 3: Actions Sheet, Column C (Type Action)
+            dv_type_actions = DataValidation(type="list", formula1=vl_actions_type_formula, allow_blank=True)
+            dv_type_actions.error = "Veuillez choisir un type d'action depuis Valeurs_Liste."
+            dv_type_actions.errorTitle = "Type d'Action Invalide"
+            dv_type_actions.prompt = "Sélectionnez un type d'action"
+            dv_type_actions.promptTitle = "Type d'Action"
+            ws_actions.add_data_validation(dv_type_actions)
+            dv_type_actions.add(f"C2:C{max_row_validation}")
+
+            # Rule 4: Actions Sheet, Column F (Statut Action)
+            dv_statut_actions = DataValidation(type="list", formula1=vl_actions_statut_formula, allow_blank=True)
+            dv_statut_actions.error = "Veuillez choisir un statut d'action depuis Valeurs_Liste."
+            dv_statut_actions.errorTitle = "Statut d'Action Invalide"
+            dv_statut_actions.prompt = "Sélectionnez un statut"
+            dv_statut_actions.promptTitle = "Statut d'Action"
+            ws_actions.add_data_validation(dv_statut_actions)
+            dv_statut_actions.add(f"F2:F{max_row_validation}")
+
+            # Rule 5: Actions Sheet, Column G (Statut Opportunité Taf)
+            dv_opportunite_actions = DataValidation(type="list", formula1=vl_actions_opportunite_formula, allow_blank=True)
+            dv_opportunite_actions.error = "Veuillez choisir un statut d'opportunité depuis Valeurs_Liste."
+            dv_opportunite_actions.errorTitle = "Statut Opportunité Invalide"
+            dv_opportunite_actions.prompt = "Sélectionnez un statut d'opportunité"
+            dv_opportunite_actions.promptTitle = "Statut Opportunité"
+            ws_actions.add_data_validation(dv_opportunite_actions)
+            dv_opportunite_actions.add(f"G2:G{max_row_validation}")
+        else:
+            st.warning("Feuille 'Actions' non trouvée. Certaines validations de données n'ont pas été appliquées.")
+            
+        # Sauvegarder le classeur modifié dans un flux BytesIO
+        output = BytesIO()
+        workbook.save(output)
+        output.seek(0) # Rembobiner le flux pour la lecture
+        return output.getvalue()
+
+    except Exception as e:
+        st.error(f"Erreur lors de la manipulation de la feuille Excel: {e}")
+        # Afficher plus de détails pour le débogage si nécessaire
+        # import traceback
+        # st.error(traceback.format_exc())
+        return None
