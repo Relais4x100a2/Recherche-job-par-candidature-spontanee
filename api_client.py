@@ -92,6 +92,17 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
         elapsed_time_page1 = time.time() - start_time_page1
         st.write(f"Page 1 ({len(results_page1)} rés.) récupérée en {elapsed_time_page1:.2f}s. Total pages estimé: {total_pages}, Total résultats API: {total_results}")
 
+        if total_pages >= 400 and total_results >= 10000:
+            st.warning(
+                f"⚠️ Votre recherche a retourné un très grand nombre de résultats (Total pages estimé: {total_pages}, Total résultats API: {total_results}). "
+                "Pour une exploration plus ciblée et pour vous assurer de ne pas manquer d'entreprises pertinentes en raison des limites d'affichage "
+                "(l'application ne peut traiter qu'un nombre limité de pages au-delà de la première), "
+                "veuillez envisager de :"
+                "\n- Réduire le rayon de recherche."
+                "\n- Affiner davantage votre sélection en utilisant des codes NAF spécifiques."
+                "\n\nCela permettra d'obtenir une liste plus gérable et pertinente."
+            )
+
         # === Étape 2: Vérifier si d'autres pages sont nécessaires ===
         if total_pages < 2:
             status.update(label=f"Recherche terminée. {len(entreprises_detaillees)} entreprises trouvées ({total_pages} page).", state="complete")
