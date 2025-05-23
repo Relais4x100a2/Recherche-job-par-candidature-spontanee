@@ -277,7 +277,7 @@ if lancer_recherche:
                         pickable=True, auto_highlight=True,
                     )
                     tooltip = {
-                        "html": "<b>{Nom complet}</b><br/>SIRET: {SIRET}<br/>Activité: {Activité NAF/APE}<br/>Effectif Étab.: {Nb salariés établissement}",
+                        "html": "<b>{Nom complet}</b><br/>SIRET: {SIRET}<br/>Activité Étab.: {Activité NAF/APE Etablissement}<br/>Effectif Étab.: {Nb salariés établissement}",
                         "style": {"backgroundColor": "rgba(0,0,0,0.7)", "color": "white", "border": "1px solid white", "padding": "5px"}
                     }
                     deck = pdk.Deck(
