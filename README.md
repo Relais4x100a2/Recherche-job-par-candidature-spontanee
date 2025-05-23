@@ -58,6 +58,7 @@ Cette application Streamlit permet de rechercher des entreprises dans un rayon g
 
 ## Structure du Projet
 
+```
 recherche_job_candidature_spontanée/
 ├── app.py                 # Point d'entrée principal de l'application Streamlit, gère l'UI et l'orchestration
 ├── config.py              # Constantes (limites API, chemins), dictionnaires (NAF, effectifs, couleurs)
@@ -67,7 +68,7 @@ recherche_job_candidature_spontanée/
 ├── NAF.csv                # Fichier de données des codes NAF
 ├── requirements.txt       # Dépendances Python du projet
 └── .gitignore             # Fichiers/dossiers ignorés par Git (ex: venv, __pycache__)
-
+```
 
 
 ## Sources de Données
