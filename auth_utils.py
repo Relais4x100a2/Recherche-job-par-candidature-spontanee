@@ -1,5 +1,6 @@
 import json
 import os
+import streamlit as st # Add this import
 
 # Directory for user-specific CRM data
 USER_DATA_DIR = "user_data"
@@ -66,3 +67,4 @@ def save_user_crm_data(username: str, data: dict):
     except IOError as e:
         # Log error or handle appropriately
         print(f"Error saving CRM data for {username}: {e}")
+        st.error(f"Failed to save CRM data to {filepath}. Error: {e}") # Add this line

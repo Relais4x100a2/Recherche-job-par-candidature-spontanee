@@ -599,3 +599,99 @@ def generate_user_crm_excel(df_entreprises: pd.DataFrame, df_contacts: pd.DataFr
 
     output.seek(0)
     return output.getvalue()
+
+def add_entreprise_records(current_df_entreprises: pd.DataFrame, new_records_df: pd.DataFrame, expected_cols: list) -> pd.DataFrame:
+    """
+    Adds new entreprise records to the current DataFrame of entreprises,
+    handles deduplication, and ensures schema.
+    """
+    if new_records_df.empty:
+        # If there are no new records, ensure the current DataFrame conforms to expected_cols
+        # This handles the case where current_df_entreprises might be empty but needs schema
+        if current_df_entreprises.empty:
+            processed_df = pd.DataFrame(columns=expected_cols)
+        else:
+            processed_df = current_df_entreprises.copy()
+        # Ensure all expected columns exist
+        for col in expected_cols:
+            if col not in processed_df.columns:
+                processed_df[col] = pd.NA # Or appropriate default
+        return processed_df.reindex(columns=expected_cols)
+
+    # Ensure new_records_df has the expected schema before concatenation,
+    # though this should ideally be handled before calling this function.
+    # For robustness, we can re-apply it here on a copy of new_records_df.
+    df_to_add_prepared = new_records_df.copy()
+    for col in expected_cols:
+        if col not in df_to_add_prepared.columns:
+            df_to_add_prepared[col] = pd.NA
+    df_to_add_prepared = df_to_add_prepared.reindex(columns=expected_cols)
+
+    # Concatenate
+    combined_df = pd.concat([current_df_entreprises, df_to_add_prepared], ignore_index=True)
+    
+    # Drop duplicates
+    if 'SIRET' in combined_df.columns:
+        combined_df.drop_duplicates(subset=['SIRET'], keep='last', inplace=True)
+    
+    # Final schema enforcement (ensure all expected columns and order)
+    # This also handles adding any expected_cols that might have been dropped if combined_df became empty
+    # or if SIRET was missing and drop_duplicates wasn't effective.
+    final_df = pd.DataFrame(columns=expected_cols) # Start with a clean slate for columns
+    if not combined_df.empty:
+        for col in expected_cols:
+            if col in combined_df.columns:
+                final_df[col] = combined_df[col]
+            else:
+                final_df[col] = pd.NA
+    else: # If combined_df is empty (e.g. current_df was empty, new_records was empty)
+        for col in expected_cols:
+            final_df[col] = pd.NA # Ensure schema on empty df
+
+    return final_df.reindex(columns=expected_cols)
+
+# Add this function to data_utils.py
+# Ensure pandas as pd and numpy as np (for pd.NA) are imported if not already.
+# numpy might not be needed if pd.NA is used directly and pandas version is appropriate.
+
+def ensure_df_schema(df: pd.DataFrame, expected_cols: list) -> pd.DataFrame:
+    """
+    Ensures the DataFrame has all expected columns with pd.NA for missing ones,
+    and reorders columns to match expected_cols.
+    """
+    df_processed = df.copy()
+    for col in expected_cols:
+        if col not in df_processed.columns:
+            df_processed[col] = pd.NA # Use pd.NA for missing values
+    
+    # Ensure correct column order and drop any columns not in expected_cols
+    return df_processed.reindex(columns=expected_cols)
+
+def get_crm_data_for_saving() -> dict:
+    """
+    Retrieves CRM DataFrames from session state, performs necessary cleaning,
+    and returns a dictionary formatted for JSON saving.
+    """
+    # Ensure DataFrames exist in session_state and have a default schema if empty
+    # This part relies on the main app ensuring df_entreprises, df_contacts, df_actions exist
+    # and preferably have their schemas (expected_cols) applied.
+    # For safety, we can try to retrieve them or default to empty DataFrames.
+    
+    df_e = st.session_state.get('df_entreprises', pd.DataFrame())
+    df_c = st.session_state.get('df_contacts', pd.DataFrame())
+    df_a = st.session_state.get('df_actions', pd.DataFrame())
+
+    # Perform data cleaning, especially for JSON serialization compatibility
+    # Example: Convert NaT in 'Date Action' to None for df_actions
+    df_a_cleaned = df_a.copy()
+    if 'Date Action' in df_a_cleaned.columns:
+        # Ensure it's datetime first, then convert NaT to None
+        df_a_cleaned['Date Action'] = pd.to_datetime(df_a_cleaned['Date Action'], errors='coerce')
+        df_a_cleaned['Date Action'] = df_a_cleaned['Date Action'].astype(object).where(df_a_cleaned['Date Action'].notnull(), None)
+    
+    crm_data = {
+        "entreprises": df_e.to_dict(orient='records'),
+        "contacts": df_c.to_dict(orient='records'),
+        "actions": df_a_cleaned.to_dict(orient='records')
+    }
+    return crm_data

@@ -30,6 +30,23 @@ import data_utils
 import api_client
 import geo_utils
 
+# --- GLOBAL COLUMN DEFINITIONS ---
+EXPECTED_ENTREPRISE_COLS = [
+    'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE établissement', 
+    'Adresse établissement', 'Nb salariés établissement', 'Est siège social', 
+    'Date de création Entreprise', "Chiffre d'Affaires Entreprise", 
+    'Résultat Net Entreprise', 'Année Finances Entreprise', 'SIREN',
+    'Notes Personnelles', 'Statut Piste'
+]
+EXPECTED_CONTACT_COLS = [
+    'Prénom Nom', 'Entreprise', 'Poste', 'Direction', 
+    'Email', 'Téléphone', 'Profil LinkedIn URL', 'Notes'
+]
+EXPECTED_ACTION_COLS = [
+    'Entreprise', 'Contact (Prénom Nom)', 'Type Action', 'Date Action', 
+    'Description/Notes', 'Statut Action', 'Statut Opportunuité Taf'
+]
+
 # --- TITRE ET DESCRIPTION (Toujours visible) ---
 st.title("🔎 Recherche d'entreprises pour candidatures spontanées")
 st.markdown("Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés.")
@@ -48,10 +65,21 @@ if not st.session_state.authenticated:
             
             # Charger les données CRM spécifiques à l'utilisateur
             st.session_state.crm_data = auth_utils.load_user_crm_data(st.session_state.username)
-            st.session_state.df_entreprises = pd.DataFrame(st.session_state.crm_data.get('entreprises', []))
-            st.session_state.df_contacts = pd.DataFrame(st.session_state.crm_data.get('contacts', []))
-            st.session_state.df_actions = pd.DataFrame(st.session_state.crm_data.get('actions', []))
             
+            # Load initial DataFrames
+            df_e = pd.DataFrame(st.session_state.crm_data.get('entreprises', []))
+            df_c = pd.DataFrame(st.session_state.crm_data.get('contacts', []))
+            df_a = pd.DataFrame(st.session_state.crm_data.get('actions', []))
+
+            # Ensure schema immediately after loading
+            st.session_state.df_entreprises = data_utils.ensure_df_schema(df_e, EXPECTED_ENTREPRISE_COLS)
+            st.session_state.df_contacts = data_utils.ensure_df_schema(df_c, EXPECTED_CONTACT_COLS)
+            st.session_state.df_actions = data_utils.ensure_df_schema(df_a, EXPECTED_ACTION_COLS)
+            
+            # Ensure 'Date Action' is datetime after schema enforcement
+            if 'Date Action' in st.session_state.df_actions.columns:
+                st.session_state.df_actions['Date Action'] = pd.to_datetime(st.session_state.df_actions['Date Action'], errors='coerce')
+
             st.rerun()
         else:
             st.sidebar.error("Nom d'utilisateur ou mot de passe incorrect.")
@@ -484,15 +512,18 @@ else:
                         # Select and order columns according to expected_entreprise_cols
                         # Using reindex will also add any missing expected columns with NA
                         df_to_add = df_to_add.reindex(columns=expected_entreprise_cols) 
-
-                        st.session_state.df_entreprises = pd.concat([st.session_state.df_entreprises, df_to_add], ignore_index=True)
-                        st.session_state.df_entreprises.drop_duplicates(subset=['SIRET'], keep='last', inplace=True)
                         
-                        # Réappliquer la structure attendue (au cas où concat aurait changé des dtypes ou manqué des colonnes si df_entreprises était vide)
-                        for col in expected_entreprise_cols:
-                            if col not in st.session_state.df_entreprises.columns:
-                                st.session_state.df_entreprises[col] = pd.NA
-                        st.session_state.df_entreprises = st.session_state.df_entreprises[expected_entreprise_cols]
+                        st.write(f"DEBUG (Ajouter Button): df_to_add is empty: {df_to_add.empty}, rows: {len(df_to_add)}")
+                        st.write(f"DEBUG (Ajouter Button): df_entreprises (before util call) is empty: {st.session_state.df_entreprises.empty if 'df_entreprises' in st.session_state else 'df_entreprises not in session_state'}, rows: {len(st.session_state.df_entreprises) if 'df_entreprises' in st.session_state and not st.session_state.df_entreprises.empty else 0}")
+
+                        # Use the new utility function
+                        st.session_state.df_entreprises = data_utils.add_entreprise_records(
+                            st.session_state.df_entreprises, # current_df_entreprises
+                            df_to_add,                      # new_records_df
+                            expected_entreprise_cols        # expected_cols
+                        )
+                        
+                        st.write(f"DEBUG (Ajouter Button): df_entreprises (after util call / final pre-rerun) is empty: {st.session_state.df_entreprises.empty}, rows: {len(st.session_state.df_entreprises)}")
 
 
                         st.success(f"{len(df_new_entreprises)} entreprise(s) ajoutée(s) à votre CRM. N'oubliez pas de sauvegarder vos modifications !")
@@ -504,29 +535,32 @@ else:
 
     # --- SECTION CRM ---
     st.divider()
+    st.write(f"DEBUG: Before 'Mon Espace CRM' header. df_entreprises is empty: {st.session_state.df_entreprises.empty if 'df_entreprises' in st.session_state else 'df_entreprises not in session_state'}") # New debug line
     st.header("Mon Espace CRM")
 
-    # Boutons Sauvegarder et Télécharger CRM en colonnes
-    col_save_crm, col_download_user_crm = st.columns(2)
+    st.write("DEBUG: 'Mon Espace CRM' header rendered. Before st.columns for save button.") # New debug line 1
+    
+    col_save_crm, col_download_user_crm = st.columns(2) 
 
     with col_save_crm:
+        st.write("DEBUG: Inside 'with col_save_crm'. Before main save button definition.") # Restored debug line
         if st.button("💾 Sauvegarder les modifications CRM", key="save_crm_button"):
-            # Convertir les DataFrames en dictionnaires pour la sauvegarde
-            # S'assurer que les colonnes datetime sont bien gérées pour la sérialisation JSON
-            # Pandas to_dict(orient='records') gère bien NaT en None, ce qui est compatible JSON.
-            
-            # Copie pour éviter de modifier directement le DataFrame de la session lors de la conversion NaT
-            df_actions_to_save = st.session_state.df_actions.copy()
-            if 'Date Action' in df_actions_to_save.columns:
-                 # Convert NaT to None specifically if not already handled by to_dict, though usually it is.
-                 # This explicit step is more robust for datetime columns.
-                df_actions_to_save['Date Action'] = df_actions_to_save['Date Action'].astype(object).where(df_actions_to_save['Date Action'].notnull(), None)
+            # Get data formatted for saving from the utility function
+            crm_data_to_save = data_utils.get_crm_data_for_saving()
 
-            crm_data_to_save = {
-                "entreprises": st.session_state.df_entreprises.to_dict(orient='records'),
-                "contacts": st.session_state.df_contacts.to_dict(orient='records'),
-                "actions": df_actions_to_save.to_dict(orient='records')
-            }
+            # --- Debugging Info Start ---
+            st.info(f"Attempting to save CRM data for user: '{st.session_state.username}'")
+            st.info(f"Number of entreprises to save: {len(crm_data_to_save['entreprises'])}")
+            st.info(f"Number of contacts to save: {len(crm_data_to_save['contacts'])}")
+            st.info(f"Number of actions to save: {len(crm_data_to_save['actions'])}")
+            
+            # Need to import auth_utils at the top of app.py if not already done for this direct call,
+            # but it should be imported as it's used elsewhere.
+            # Ensure this call is correct based on how auth_utils is imported.
+            # Assuming 'import auth_utils' is present.
+            target_filepath = auth_utils.get_user_crm_filepath(st.session_state.username)
+            st.info(f"Target file path: {target_filepath}")
+            # --- Debugging Info End ---
             
             auth_utils.save_user_crm_data(st.session_state.username, crm_data_to_save)
             st.success("🎉 Modifications CRM sauvegardées avec succès !")
@@ -615,28 +649,28 @@ else:
     with tab_entreprises:
         st.subheader("Mes Entreprises Sauvegardées")
 
-        # Define expected columns for consistency
-        expected_entreprise_cols = [
-            'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE établissement', 
-            'Adresse établissement', 'Nb salariés établissement', 'Est siège social', 
-            'Date de création Entreprise', "Chiffre d'Affaires Entreprise", 
-            'Résultat Net Entreprise', 'Année Finances Entreprise', 'SIREN',
-            'Notes Personnelles', 'Statut Piste' # Added for direct editing
-        ]
+        # Define expected columns for consistency (this will be global now)
+        # expected_entreprise_cols = [
+        #     'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE établissement', 
+        #     'Adresse établissement', 'Nb salariés établissement', 'Est siège social', 
+        #     'Date de création Entreprise', "Chiffre d'Affaires Entreprise", 
+        #     'Résultat Net Entreprise', 'Année Finances Entreprise', 'SIREN',
+        #     'Notes Personnelles', 'Statut Piste' # Added for direct editing
+        # ]
         # Ensure df_entreprises has all expected columns, add if missing
-        for col in expected_entreprise_cols:
-            if col not in st.session_state.df_entreprises.columns:
-                st.session_state.df_entreprises[col] = pd.NA
+        # for col in EXPECTED_ENTREPRISE_COLS: # Use global
+        #     if col not in st.session_state.df_entreprises.columns:
+        #         st.session_state.df_entreprises[col] = pd.NA
 
 
         if st.session_state.df_entreprises.empty:
             st.info("Aucune entreprise sauvegardée pour le moment. Ajoutez des entreprises via la recherche ou manuellement ci-dessous.")
             # Provide a way to add the first row if df is empty
             # Create an empty DataFrame with expected columns to allow adding the first row
-            empty_df_for_editor = pd.DataFrame(columns=expected_entreprise_cols)
+            empty_df_for_editor = pd.DataFrame(columns=EXPECTED_ENTREPRISE_COLS) # Use global
             empty_df_for_editor["Supprimer ?"] = False 
             # Ensure 'Supprimer ?' is first
-            cols_ordered_empty = ["Supprimer ?"] + expected_entreprise_cols
+            cols_ordered_empty = ["Supprimer ?"] + EXPECTED_ENTREPRISE_COLS # Use global
             empty_df_for_editor = empty_df_for_editor[cols_ordered_empty]
 
             edited_df_entreprises = st.data_editor(
@@ -719,26 +753,19 @@ else:
             else:
                  st.session_state.df_entreprises = edited_df_entreprises # Should not happen if "Supprimer ?" was added
 
-        # Ensure all expected columns are present in the final df_entreprises, even if empty after deletions
-        current_cols_after_edit = st.session_state.df_entreprises.columns.tolist()
-        for col in expected_entreprise_cols:
-            if col not in current_cols_after_edit:
-                st.session_state.df_entreprises[col] = pd.NA
-        
-        # Reorder to maintain consistency, dropping link columns as they are regenerated
-        final_df_cols = [col for col in expected_entreprise_cols if col in st.session_state.df_entreprises.columns]
-        st.session_state.df_entreprises = st.session_state.df_entreprises[final_df_cols]
+        # Ensure final schema using the utility function
+        st.session_state.df_entreprises = data_utils.ensure_df_schema(st.session_state.df_entreprises, EXPECTED_ENTREPRISE_COLS)
 
     with tab_contacts:
         st.subheader("Mes Contacts")
 
-        expected_contact_cols = [
-            'Prénom Nom', 'Entreprise', 'Poste', 'Direction', 
-            'Email', 'Téléphone', 'Profil LinkedIn URL', 'Notes'
-        ]
-        for col in expected_contact_cols:
-            if col not in st.session_state.df_contacts.columns:
-                st.session_state.df_contacts[col] = pd.NA
+        # expected_contact_cols = [
+        #     'Prénom Nom', 'Entreprise', 'Poste', 'Direction', 
+        #     'Email', 'Téléphone', 'Profil LinkedIn URL', 'Notes'
+        # ]
+        # for col in EXPECTED_CONTACT_COLS: # Use global
+        #     if col not in st.session_state.df_contacts.columns:
+        #         st.session_state.df_contacts[col] = pd.NA
 
         # Prepare options for SelectboxColumn
         entreprise_options = []
@@ -749,9 +776,9 @@ else:
 
         if st.session_state.df_contacts.empty:
             st.info("Aucun contact sauvegardé. Ajoutez des contacts manuellement ci-dessous.")
-            empty_df_for_editor_contacts = pd.DataFrame(columns=expected_contact_cols)
+            empty_df_for_editor_contacts = pd.DataFrame(columns=EXPECTED_CONTACT_COLS) # Use global
             empty_df_for_editor_contacts["Supprimer ?"] = False
-            cols_ordered_empty_contacts = ["Supprimer ?"] + expected_contact_cols
+            cols_ordered_empty_contacts = ["Supprimer ?"] + EXPECTED_CONTACT_COLS # Use global
             empty_df_for_editor_contacts = empty_df_for_editor_contacts[cols_ordered_empty_contacts]
 
             edited_df_contacts = st.data_editor(
@@ -817,29 +844,23 @@ else:
             else:
                 st.session_state.df_contacts = edited_df_contacts
 
-        # Ensure all expected columns are present in the final df_contacts
-        current_cols_after_edit_contacts = st.session_state.df_contacts.columns.tolist()
-        for col in expected_contact_cols:
-            if col not in current_cols_after_edit_contacts:
-                st.session_state.df_contacts[col] = pd.NA
-        
-        # Reorder to maintain consistency
-        st.session_state.df_contacts = st.session_state.df_contacts[expected_contact_cols]
+        # Ensure final schema using the utility function
+        st.session_state.df_contacts = data_utils.ensure_df_schema(st.session_state.df_contacts, EXPECTED_CONTACT_COLS)
 
     with tab_actions:
         st.subheader("Mes Actions et Suivis")
 
-        expected_action_cols = [
-            'Entreprise', 'Contact (Prénom Nom)', 'Type Action', 'Date Action', 
-            'Description/Notes', 'Statut Action', 'Statut Opportunuité Taf'
-        ]
-        for col in expected_action_cols:
-            if col not in st.session_state.df_actions.columns:
-                st.session_state.df_actions[col] = pd.NA
+        # expected_action_cols = [
+        #     'Entreprise', 'Contact (Prénom Nom)', 'Type Action', 'Date Action', 
+        #     'Description/Notes', 'Statut Action', 'Statut Opportunuité Taf'
+        # ]
+        # for col in EXPECTED_ACTION_COLS: # Use global
+        #     if col not in st.session_state.df_actions.columns:
+        #         st.session_state.df_actions[col] = pd.NA
         
-        # Ensure 'Date Action' is datetime
-        if 'Date Action' in st.session_state.df_actions.columns:
-            st.session_state.df_actions['Date Action'] = pd.to_datetime(st.session_state.df_actions['Date Action'], errors='coerce')
+        # Ensure 'Date Action' is datetime (moved to login)
+        # if 'Date Action' in st.session_state.df_actions.columns:
+        #     st.session_state.df_actions['Date Action'] = pd.to_datetime(st.session_state.df_actions['Date Action'], errors='coerce')
 
 
         # Prepare options for SelectboxColumns
@@ -856,12 +877,12 @@ else:
 
         if st.session_state.df_actions.empty:
             st.info("Aucune action sauvegardée. Ajoutez des actions manuellement ci-dessous.")
-            empty_df_for_editor_actions = pd.DataFrame(columns=expected_action_cols)
+            empty_df_for_editor_actions = pd.DataFrame(columns=EXPECTED_ACTION_COLS) # Use global
             empty_df_for_editor_actions["Supprimer ?"] = False
-            cols_ordered_empty_actions = ["Supprimer ?"] + expected_action_cols
+            cols_ordered_empty_actions = ["Supprimer ?"] + EXPECTED_ACTION_COLS # Use global
             empty_df_for_editor_actions = empty_df_for_editor_actions[cols_ordered_empty_actions]
-            # Ensure 'Date Action' is datetime for empty editor too
-            empty_df_for_editor_actions['Date Action'] = pd.to_datetime(empty_df_for_editor_actions['Date Action'], errors='coerce')
+            # Ensure 'Date Action' is datetime for empty editor too (handled at load)
+            # empty_df_for_editor_actions['Date Action'] = pd.to_datetime(empty_df_for_editor_actions['Date Action'], errors='coerce')
 
 
             edited_df_actions = st.data_editor(
@@ -919,14 +940,8 @@ else:
             else:
                 st.session_state.df_actions = edited_df_actions
 
-        # Ensure all expected columns are present and Date Action is datetime
-        current_cols_after_edit_actions = st.session_state.df_actions.columns.tolist()
-        for col in expected_action_cols:
-            if col not in current_cols_after_edit_actions:
-                st.session_state.df_actions[col] = pd.NA
-        
+        # Ensure final schema using the utility function
+        st.session_state.df_actions = data_utils.ensure_df_schema(st.session_state.df_actions, EXPECTED_ACTION_COLS)
+        # Coerce 'Date Action' to datetime after schema is ensured, as data_editor might change its type
         if 'Date Action' in st.session_state.df_actions.columns:
              st.session_state.df_actions['Date Action'] = pd.to_datetime(st.session_state.df_actions['Date Action'], errors='coerce')
-
-        # Reorder to maintain consistency
-        st.session_state.df_actions = st.session_state.df_actions[expected_action_cols]
