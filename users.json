@@ -1,6 +1,6 @@
 [
   {
     "username": "testuser",
-    "hashed_password": "$2b$12$DtxKWpXOx6BJZk.OIMMmN.q8oaVN.aC3wB7DuUsiMZtyIsitTqbpq"
+    "password": "testpassword123"
   }
 ]

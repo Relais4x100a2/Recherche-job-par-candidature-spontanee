@@ -1,19 +1,12 @@
-import bcrypt
 import json
 import os
 
 # Directory for user-specific CRM data
 USER_DATA_DIR = "user_data"
 
-def hash_password(password: str) -> str:
-    """Hashes a password using bcrypt."""
-    salt = bcrypt.gensalt()
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed_password.decode('utf-8')
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifies a plain text password against a stored bcrypt hash."""
-    return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+def verify_password(plain_password: str, stored_plain_password: str) -> bool:
+    """Verifies a plain text password against a stored plain text password."""
+    return plain_password == stored_plain_password
 
 def get_users() -> list:
     """Reads users from users.json."""
@@ -24,10 +17,12 @@ def get_users() -> list:
         return []
 
 def verify_user(username, password) -> bool:
-    """Verifies user credentials."""
+    """Verifies user credentials by comparing plain text passwords."""
     users = get_users()
     for user in users:
-        if user["username"] == username and verify_password(password, user["hashed_password"]):
+        # Assuming users.json now stores plain text passwords in "password" or "plain_password"
+        # For this example, let's assume the key in users.json is "password"
+        if user["username"] == username and verify_password(password, user.get("password", "")): # Changed "hashed_password" to "password"
             return True
     return False
 
