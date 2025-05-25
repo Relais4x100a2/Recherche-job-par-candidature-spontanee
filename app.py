@@ -474,20 +474,16 @@ else:
                         ]
                         
                         # Préparer df_new_entreprises pour la concaténation
-                        df_to_add = pd.DataFrame(columns=expected_entreprise_cols)
+                        df_to_add = df_new_entreprises.copy() # Start with the data
 
+                        # Ensure all expected columns exist, adding NA for missing ones
                         for col in expected_entreprise_cols:
-                            if col in df_new_entreprises.columns:
-                                df_to_add[col] = df_new_entreprises[col]
-                            else:
-                                df_to_add[col] = pd.NA # Remplir les colonnes manquantes avec pd.NA
-
-                        # S'assurer que les colonnes manquantes après la sélection sont bien celles attendues pour l'ajout
-                        for col in expected_entreprise_cols:
-                             if col not in df_to_add.columns:
+                            if col not in df_to_add.columns:
                                 df_to_add[col] = pd.NA
                         
-                        df_to_add = df_to_add[expected_entreprise_cols] # Assurer l'ordre et la présence de toutes les colonnes attendues
+                        # Select and order columns according to expected_entreprise_cols
+                        # Using reindex will also add any missing expected columns with NA
+                        df_to_add = df_to_add.reindex(columns=expected_entreprise_cols) 
 
                         st.session_state.df_entreprises = pd.concat([st.session_state.df_entreprises, df_to_add], ignore_index=True)
                         st.session_state.df_entreprises.drop_duplicates(subset=['SIRET'], keep='last', inplace=True)
