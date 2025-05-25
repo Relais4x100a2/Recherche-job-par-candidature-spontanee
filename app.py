@@ -222,7 +222,7 @@ else:
         col_idx_eff = 0
         for label, codes_in_group in config.effectifs_groupes.items():
             # Déterminer l'état actuel basé sur session_state
-            is_group_currently_selected = any(code in st.session_state.selected_effectifs_codes for code in group_codes)
+            is_group_currently_selected = any(code in st.session_state.selected_effectifs_codes for code in codes_in_group)
             with cols_eff[col_idx_eff % len(cols_eff)]:
                 st.checkbox(
                     label,
@@ -516,25 +516,25 @@ else:
     with col_save_crm:
         if st.button("💾 Sauvegarder les modifications CRM", key="save_crm_button"):
             # Convertir les DataFrames en dictionnaires pour la sauvegarde
-        # S'assurer que les colonnes datetime sont bien gérées pour la sérialisation JSON
-        # Pandas to_dict(orient='records') gère bien NaT en None, ce qui est compatible JSON.
-        
-        # Copie pour éviter de modifier directement le DataFrame de la session lors de la conversion NaT
-        df_actions_to_save = st.session_state.df_actions.copy()
-        if 'Date Action' in df_actions_to_save.columns:
-             # Convert NaT to None specifically if not already handled by to_dict, though usually it is.
-             # This explicit step is more robust for datetime columns.
-            df_actions_to_save['Date Action'] = df_actions_to_save['Date Action'].astype(object).where(df_actions_to_save['Date Action'].notnull(), None)
+            # S'assurer que les colonnes datetime sont bien gérées pour la sérialisation JSON
+            # Pandas to_dict(orient='records') gère bien NaT en None, ce qui est compatible JSON.
+            
+            # Copie pour éviter de modifier directement le DataFrame de la session lors de la conversion NaT
+            df_actions_to_save = st.session_state.df_actions.copy()
+            if 'Date Action' in df_actions_to_save.columns:
+                 # Convert NaT to None specifically if not already handled by to_dict, though usually it is.
+                 # This explicit step is more robust for datetime columns.
+                df_actions_to_save['Date Action'] = df_actions_to_save['Date Action'].astype(object).where(df_actions_to_save['Date Action'].notnull(), None)
 
-        crm_data_to_save = {
-            "entreprises": st.session_state.df_entreprises.to_dict(orient='records'),
-            "contacts": st.session_state.df_contacts.to_dict(orient='records'),
-            "actions": df_actions_to_save.to_dict(orient='records')
-        }
-        
-        auth_utils.save_user_crm_data(st.session_state.username, crm_data_to_save)
-        st.success("🎉 Modifications CRM sauvegardées avec succès !")
-        # Optionnel: st.rerun() # Peut être ajouté si on veut forcer une relecture des données depuis le fichier après sauvegarde
+            crm_data_to_save = {
+                "entreprises": st.session_state.df_entreprises.to_dict(orient='records'),
+                "contacts": st.session_state.df_contacts.to_dict(orient='records'),
+                "actions": df_actions_to_save.to_dict(orient='records')
+            }
+            
+            auth_utils.save_user_crm_data(st.session_state.username, crm_data_to_save)
+            st.success("🎉 Modifications CRM sauvegardées avec succès !")
+            # Optionnel: st.rerun() # Peut être ajouté si on veut forcer une relecture des données depuis le fichier après sauvegarde
 
     with col_download_user_crm:
         try:
