@@ -221,15 +221,18 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
             
             # 3. VALEURS_LISTE Sheet
             vl_headers = ['CONTACTS_Direction', 'ACTIONS_TypeAction', 'ACTIONS_StatutAction', 'ACTIONS_StatutOpportunuiteTaf']
-            vl_data = {
-                'CONTACTS_Direction': ["Dir. Achats", "Dir. Commerciale", "Dir. Communication", "Dir. Financière / Admin&Fin", "Dir. Générale", "Dir. Juridique", "Dir. Marketing", "Dir. Production", "Dir. R&D", "Dir. RH"],
-                'ACTIONS_TypeAction': ["Mise en relation", "Prise de contact", "Visite de l'entreprise", "Échange par e-mail", "Envoi de CV et lettre de motivation", "Entretien téléphonique", "Test de compétences", "Entretien physique", "Relance"],
-                'ACTIONS_StatutAction': ["A faire", "En attente", "En cours", "Terminé", "Annulé"],
-                'ACTIONS_StatutOpportunuiteTaf': ["Ciblée", "En veille", "Ciblée", "Postulée", "Abandonnée", "Refusée", "Offre reçue", "Acceptée"]
+            
+            # Use global lists from config.py
+            vl_data_from_config = {
+                'CONTACTS_Direction': config.VALEURS_LISTE_CONTACTS_DIRECTION,
+                'ACTIONS_TypeAction': config.VALEURS_LISTE_ACTIONS_TYPEACTION,
+                'ACTIONS_StatutAction': config.VALEURS_LISTE_ACTIONS_STATUTACTION,
+                'ACTIONS_StatutOpportunuiteTaf': config.VALEURS_LISTE_ACTIONS_STATUTOPPORTUNITE
             }
+            
             # Create DataFrame by padding shorter lists with None to make them equal length for DataFrame creation
-            max_len = max(len(lst) for lst in vl_data.values())
-            padded_vl_data = {col: lst + [None]*(max_len - len(lst)) for col, lst in vl_data.items()}
+            max_len = max(len(lst) for lst in vl_data_from_config.values())
+            padded_vl_data = {col: lst + [None]*(max_len - len(lst)) for col, lst in vl_data_from_config.items()}
             df_valeurs_liste = pd.DataFrame(padded_vl_data)
             df_valeurs_liste = df_valeurs_liste[vl_headers] # Ensure column order
             df_valeurs_liste.to_excel(writer, sheet_name='VALEURS_LISTE', index=False, freeze_panes=(1, 0))
@@ -385,6 +388,213 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
         st.error(f"Une erreur est survenue lors de la génération du fichier Excel : {e}")
         import traceback
         st.error(traceback.format_exc()) # For more detailed debugging
+        return None
+
+    output.seek(0)
+    return output.getvalue()
+
+
+def generate_user_crm_excel(df_entreprises: pd.DataFrame, df_contacts: pd.DataFrame, df_actions: pd.DataFrame) -> bytes:
+    """
+    Génère un fichier Excel (.xlsx) à partir des DataFrames CRM de l'utilisateur.
+    """
+    output = BytesIO()
+    try:
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            workbook = writer.book
+
+            # 1. DATA_IMPORT Sheet (from df_entreprises, but only relevant columns)
+            # These are typically columns that might come from an initial API search or import,
+            # excluding user-added notes or statuses if they are not part of the "raw" data concept.
+            # For this version, we'll include most columns from df_entreprises but ensure
+            # it matches the structure expected if it were raw data.
+            data_import_cols = [
+                'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE Etablissement', 
+                # 'code_naf_etablissement', # Assuming this is not directly in df_entreprises, but derived if needed
+                # 'Activité NAF/APE Entreprise', # Assuming this is not directly in df_entreprises
+                # 'code_naf_entreprise', # Assuming this is not directly in df_entreprises
+                'Adresse établissement', 'Nb salariés établissement', 'Est siège social', 
+                'Date de création Entreprise', "Chiffre d'Affaires Entreprise", 
+                'Résultat Net Entreprise', 'Année Finances Entreprise', 'SIREN'
+            ]
+            df_data_import = pd.DataFrame()
+            for col in data_import_cols:
+                if col in df_entreprises.columns:
+                    df_data_import[col] = df_entreprises[col]
+                else:
+                    df_data_import[col] = pd.NA # Use pd.NA for missing columns
+
+            df_data_import = df_data_import[data_import_cols] # Ensure correct order
+            df_data_import.to_excel(writer, sheet_name='DATA_IMPORT', index=False, freeze_panes=(1, 0))
+            num_data_rows_entreprises = len(df_entreprises) # Used for formula ranges later
+
+            # 2. ENTREPRISES Sheet (direct from user's df_entreprises)
+            # Include user-specific columns like 'Notes Personnelles', 'Statut Piste'
+            df_entreprises_sheet = df_entreprises.copy()
+            
+            # Generate hyperlink columns if base columns exist
+            if 'Nom complet' in df_entreprises_sheet.columns:
+                 df_entreprises_sheet['Recherche LinkedIn'] = df_entreprises_sheet['Nom complet'].apply(
+                    lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com" if pd.notna(x) and x.strip() != "" else None)
+            else:
+                df_entreprises_sheet['Recherche LinkedIn'] = None
+
+            if 'Nom complet' in df_entreprises_sheet.columns and 'Adresse établissement' in df_entreprises_sheet.columns:
+                 df_entreprises_sheet['Recherche Google Maps'] = df_entreprises_sheet.apply(
+                    lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Nom complet']},{row['Adresse établissement']}" if pd.notna(row['Nom complet']) and row['Nom complet'].strip() != "" and pd.notna(row['Adresse établissement']) and row['Adresse établissement'].strip() != "" else None, axis=1)
+            else:
+                df_entreprises_sheet['Recherche Google Maps'] = None
+
+            # Define desired column order for the sheet
+            entreprises_sheet_cols_ordered = [
+                'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE établissement', 
+                'Adresse établissement', 'Recherche LinkedIn', 'Recherche Google Maps', 
+                'Nb salariés établissement', 'Est siège social', 'Date de création Entreprise', 
+                "Chiffre d'Affaires Entreprise", 'Résultat Net Entreprise', 
+                'Année Finances Entreprise', 'SIREN', 'Notes Personnelles', 'Statut Piste'
+            ]
+            # Add any columns that might be in df_entreprises_sheet but not in the defined order (e.g., old columns)
+            for col in df_entreprises_sheet.columns:
+                if col not in entreprises_sheet_cols_ordered:
+                    entreprises_sheet_cols_ordered.append(col)
+            
+            df_entreprises_sheet = df_entreprises_sheet.reindex(columns=entreprises_sheet_cols_ordered)
+            df_entreprises_sheet.to_excel(writer, sheet_name='ENTREPRISES', index=False, freeze_panes=(1, 0))
+
+
+            # 3. VALEURS_LISTE Sheet (from config)
+            vl_headers = ['CONTACTS_Direction', 'ACTIONS_TypeAction', 'ACTIONS_StatutAction', 'ACTIONS_StatutOpportunuiteTaf']
+            vl_data_from_config = {
+                'CONTACTS_Direction': config.VALEURS_LISTE_CONTACTS_DIRECTION,
+                'ACTIONS_TypeAction': config.VALEURS_LISTE_ACTIONS_TYPEACTION,
+                'ACTIONS_StatutAction': config.VALEURS_LISTE_ACTIONS_STATUTACTION,
+                'ACTIONS_StatutOpportunuiteTaf': config.VALEURS_LISTE_ACTIONS_STATUTOPPORTUNITE
+            }
+            max_len_vl = max(len(lst) for lst in vl_data_from_config.values())
+            padded_vl_data = {col: lst + [pd.NA]*(max_len_vl - len(lst)) for col, lst in vl_data_from_config.items()}
+            df_valeurs_liste = pd.DataFrame(padded_vl_data)
+            df_valeurs_liste = df_valeurs_liste[vl_headers]
+            df_valeurs_liste.to_excel(writer, sheet_name='VALEURS_LISTE', index=False, freeze_panes=(1, 0))
+
+            # 4. CONTACTS Sheet (direct from user's df_contacts)
+            df_contacts_sheet = df_contacts.copy()
+            # Ensure all expected columns are present
+            expected_contact_cols = ['Prénom Nom', 'Entreprise', 'Poste', 'Direction', 'Email', 'Téléphone', 'Profil LinkedIn URL', 'Notes']
+            for col in expected_contact_cols:
+                if col not in df_contacts_sheet.columns:
+                    df_contacts_sheet[col] = pd.NA
+            df_contacts_sheet = df_contacts_sheet[expected_contact_cols]
+            df_contacts_sheet.to_excel(writer, sheet_name='CONTACTS', index=False, freeze_panes=(1, 0))
+
+            # 5. ACTIONS Sheet (direct from user's df_actions)
+            df_actions_sheet = df_actions.copy()
+            # Ensure 'Date Action' is string or Excel might format it poorly if NaT exists
+            if 'Date Action' in df_actions_sheet.columns:
+                df_actions_sheet['Date Action'] = df_actions_sheet['Date Action'].astype(object).where(df_actions_sheet['Date Action'].notnull(), None)
+            
+            expected_action_cols = ['Entreprise', 'Contact (Prénom Nom)', 'Type Action', 'Date Action', 'Description/Notes', 'Statut Action', 'Statut Opportunuité Taf']
+            for col in expected_action_cols:
+                if col not in df_actions_sheet.columns:
+                    df_actions_sheet[col] = pd.NA
+            df_actions_sheet = df_actions_sheet[expected_action_cols]
+            df_actions_sheet.to_excel(writer, sheet_name='ACTIONS', index=False, freeze_panes=(1, 0))
+            
+            # 6. Data Validation (similar to generate_crm_excel)
+            max_row_validation = 5000 # Consistent with other function
+            
+            # CONTACTS Sheet Validations
+            ws_contacts = workbook['CONTACTS']
+            # Entreprise validation (from ENTREPRISES sheet, 'Nom complet' column - B)
+            dv_contacts_entreprise = DataValidation(type="list", formula1=f"=ENTREPRISES!$B$2:$B${max_row_validation}", allow_blank=True)
+            ws_contacts.add_data_validation(dv_contacts_entreprise)
+            dv_contacts_entreprise.add(f"B2:B{max_row_validation}")
+            # Direction validation (from VALEURS_LISTE sheet, column A)
+            dv_contacts_direction = DataValidation(type="list", formula1=f"=VALEURS_LISTE!$A$2:$A${max_row_validation}", allow_blank=True)
+            ws_contacts.add_data_validation(dv_contacts_direction)
+            dv_contacts_direction.add(f"D2:D{max_row_validation}")
+
+            # ACTIONS Sheet Validations
+            ws_actions = workbook['ACTIONS']
+            # Entreprise validation
+            dv_actions_entreprise = DataValidation(type="list", formula1=f"=ENTREPRISES!$B$2:$B${max_row_validation}", allow_blank=True)
+            ws_actions.add_data_validation(dv_actions_entreprise)
+            dv_actions_entreprise.add(f"A2:A{max_row_validation}")
+            # Contact validation (from CONTACTS sheet, 'Prénom Nom' column - A)
+            dv_actions_contact = DataValidation(type="list", formula1=f"=CONTACTS!$A$2:$A${max_row_validation}", allow_blank=True)
+            ws_actions.add_data_validation(dv_actions_contact)
+            dv_actions_contact.add(f"B2:B{max_row_validation}")
+            # Type Action (from VALEURS_LISTE sheet, column B)
+            dv_actions_type = DataValidation(type="list", formula1=f"=VALEURS_LISTE!$B$2:$B${max_row_validation}", allow_blank=True)
+            ws_actions.add_data_validation(dv_actions_type)
+            dv_actions_type.add(f"C2:C{max_row_validation}")
+            # Statut Action (from VALEURS_LISTE sheet, column C)
+            dv_actions_statut = DataValidation(type="list", formula1=f"=VALEURS_LISTE!$C$2:$C${max_row_validation}", allow_blank=True)
+            ws_actions.add_data_validation(dv_actions_statut)
+            dv_actions_statut.add(f"F2:F{max_row_validation}")
+            # Statut Opportunuité Taf (from VALEURS_LISTE sheet, column D)
+            dv_actions_opportunite = DataValidation(type="list", formula1=f"=VALEURS_LISTE!$D$2:$D${max_row_validation}", allow_blank=True)
+            ws_actions.add_data_validation(dv_actions_opportunite)
+            dv_actions_opportunite.add(f"G2:G{max_row_validation}")
+
+            # 7. Formatting: Auto-adjust column widths
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                for col_idx, column_cells in enumerate(sheet.columns):
+                    max_length = 0
+                    column_letter = get_column_letter(col_idx + 1)
+                    
+                    # Header length
+                    if sheet.cell(row=1, column=col_idx + 1).value:
+                         max_length = len(str(sheet.cell(row=1, column=col_idx + 1).value))
+                    
+                    # Cell content length (check first N rows for performance)
+                    for i, cell in enumerate(column_cells):
+                        if i > 100: break # Limit rows checked for performance
+                        try:
+                            if cell.value:
+                                cell_len = len(str(cell.value))
+                                if cell_len > max_length:
+                                    max_length = cell_len
+                        except:
+                            pass
+                    adjusted_width = (max_length + 2) * 1.2
+                    adjusted_width = min(adjusted_width, 60) # Cap max width
+                    sheet.column_dimensions[column_letter].width = adjusted_width
+            
+            # 8. Styling Headers
+            header_font = Font(bold=True, color="FFFFFFFF")
+            header_fill = PatternFill(start_color="FF4472C4", end_color="FF4472C4", fill_type="solid")
+            header_alignment = Alignment(horizontal="center", vertical="center")
+            sheets_to_style_headers = ['ENTREPRISES', 'CONTACTS', 'ACTIONS', 'VALEURS_LISTE', 'DATA_IMPORT']
+            for sheet_name in sheets_to_style_headers:
+                if sheet_name in workbook.sheetnames:
+                    sheet = workbook[sheet_name]
+                    for cell in sheet[1]:
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
+            
+            # 9. Hide DATA_IMPORT sheet
+            if 'DATA_IMPORT' in workbook.sheetnames:
+                workbook['DATA_IMPORT'].sheet_state = 'hidden'
+
+            # 10. Set Sheet Order
+            desired_visible_order = ['ENTREPRISES', 'CONTACTS', 'ACTIONS', 'VALEURS_LISTE']
+            current_sheet_titles = [sheet.title for sheet in workbook._sheets]
+            final_ordered_sheets = []
+            for title in desired_visible_order:
+                if title in current_sheet_titles:
+                    final_ordered_sheets.append(workbook[title])
+            for title in current_sheet_titles:
+                if title not in desired_visible_order: # Add remaining sheets (like DATA_IMPORT)
+                    final_ordered_sheets.append(workbook[title])
+            workbook._sheets = final_ordered_sheets
+
+    except Exception as e:
+        # Consider logging the error or using st.error if this can be called from Streamlit context directly
+        print(f"Error generating user CRM Excel: {e}") # Basic print for now
+        import traceback
+        print(traceback.format_exc())
         return None
 
     output.seek(0)

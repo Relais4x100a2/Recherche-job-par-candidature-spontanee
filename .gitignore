@@ -2,4 +2,11 @@ venv/
 .idea/
 __pycache__/
 
+# User-specific data
+user_data/
+
+# Exported files
+*.xlsx
+*.csv
+
 

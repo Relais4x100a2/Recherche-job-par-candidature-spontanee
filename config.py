@@ -87,3 +87,25 @@ COLS_EXPORT_ORDER = [
     # Decided to keep Color and Radius for now as they were in the original list.
     'Color', 'Radius'
 ]
+
+# --- Listes de valeurs pour les menus déroulants du CRM ---
+VALEURS_LISTE_CONTACTS_DIRECTION = [
+    "Dir. Achats", "Dir. Commerciale", "Dir. Communication", 
+    "Dir. Financière / Admin&Fin", "Dir. Générale", "Dir. Juridique", 
+    "Dir. Marketing", "Dir. Production", "Dir. R&D", "Dir. RH"
+]
+
+VALEURS_LISTE_ACTIONS_TYPEACTION = [
+    "Mise en relation", "Prise de contact", "Visite de l'entreprise", 
+    "Échange par e-mail", "Envoi de CV et lettre de motivation", 
+    "Entretien téléphonique", "Test de compétences", "Entretien physique", "Relance"
+]
+
+VALEURS_LISTE_ACTIONS_STATUTACTION = [
+    "A faire", "En attente", "En cours", "Terminé", "Annulé"
+]
+
+VALEURS_LISTE_ACTIONS_STATUTOPPORTUNITE = [
+    "Ciblée", "En veille", "Ciblée", "Postulée", "Abandonnée", # Note: "Ciblée" is duplicated
+    "Refusée", "Offre reçue", "Acceptée"
+]
