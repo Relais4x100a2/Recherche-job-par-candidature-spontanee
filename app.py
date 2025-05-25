@@ -513,8 +513,14 @@ else:
                         # Using reindex will also add any missing expected columns with NA
                         df_to_add = df_to_add.reindex(columns=expected_entreprise_cols) 
                         
-                        st.write(f"DEBUG (Ajouter Button): df_to_add is empty: {df_to_add.empty}, rows: {len(df_to_add)}")
-                        st.write(f"DEBUG (Ajouter Button): df_entreprises (before util call) is empty: {st.session_state.df_entreprises.empty if 'df_entreprises' in st.session_state else 'df_entreprises not in session_state'}, rows: {len(st.session_state.df_entreprises) if 'df_entreprises' in st.session_state and not st.session_state.df_entreprises.empty else 0}")
+                        st.write("--- DEBUG: Before calling add_entreprise_records ---")
+                        st.write(f"Shape of st.session_state.df_entreprises: {st.session_state.df_entreprises.shape if 'df_entreprises' in st.session_state and not st.session_state.df_entreprises.empty else 'N/A or Empty'}")
+                        st.write("Head of st.session_state.df_entreprises:")
+                        st.dataframe(st.session_state.df_entreprises.head() if 'df_entreprises' in st.session_state and not st.session_state.df_entreprises.empty else pd.DataFrame()) # Use st.dataframe for better display
+
+                        st.write(f"Shape of df_to_add: {df_to_add.shape if not df_to_add.empty else 'N/A or Empty'}")
+                        st.write("Head of df_to_add:")
+                        st.dataframe(df_to_add.head() if not df_to_add.empty else pd.DataFrame()) # Use st.dataframe
 
                         # Use the new utility function
                         st.session_state.df_entreprises = data_utils.add_entreprise_records(
@@ -523,8 +529,10 @@ else:
                             expected_entreprise_cols        # expected_cols
                         )
                         
-                        st.write(f"DEBUG (Ajouter Button): df_entreprises (after util call / final pre-rerun) is empty: {st.session_state.df_entreprises.empty}, rows: {len(st.session_state.df_entreprises)}")
-
+                        st.write("--- DEBUG: After calling add_entreprise_records ---")
+                        st.write(f"Shape of updated st.session_state.df_entreprises: {st.session_state.df_entreprises.shape if not st.session_state.df_entreprises.empty else 'N/A or Empty'}")
+                        st.write("Head of updated st.session_state.df_entreprises:")
+                        st.dataframe(st.session_state.df_entreprises.head() if not st.session_state.df_entreprises.empty else pd.DataFrame()) # Use st.dataframe
 
                         st.success(f"{len(df_new_entreprises)} entreprise(s) ajoutée(s) à votre CRM. N'oubliez pas de sauvegarder vos modifications !")
                         st.rerun()
@@ -561,6 +569,11 @@ else:
             target_filepath = auth_utils.get_user_crm_filepath(st.session_state.username)
             st.info(f"Target file path: {target_filepath}")
             # --- Debugging Info End ---
+            
+            st.write("--- DEBUG: Before calling save_user_crm_data ---")
+            st.write(f"Number of records in st.session_state.df_entreprises to be saved: {len(st.session_state.df_entreprises) if 'df_entreprises' in st.session_state else 'df_entreprises not in session_state'}")
+            st.write(f"Number of records in st.session_state.df_contacts to be saved: {len(st.session_state.df_contacts) if 'df_contacts' in st.session_state else 'df_contacts not in session_state'}")
+            st.write(f"Number of records in st.session_state.df_actions to be saved: {len(st.session_state.df_actions) if 'df_actions' in st.session_state else 'df_actions not in session_state'}")
             
             auth_utils.save_user_crm_data(st.session_state.username, crm_data_to_save)
             st.success("🎉 Modifications CRM sauvegardées avec succès !")

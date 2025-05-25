@@ -605,50 +605,41 @@ def add_entreprise_records(current_df_entreprises: pd.DataFrame, new_records_df:
     Adds new entreprise records to the current DataFrame of entreprises,
     handles deduplication, and ensures schema.
     """
-    if new_records_df.empty:
-        # If there are no new records, ensure the current DataFrame conforms to expected_cols
-        # This handles the case where current_df_entreprises might be empty but needs schema
-        if current_df_entreprises.empty:
-            processed_df = pd.DataFrame(columns=expected_cols)
-        else:
-            processed_df = current_df_entreprises.copy()
-        # Ensure all expected columns exist
-        for col in expected_cols:
-            if col not in processed_df.columns:
-                processed_df[col] = pd.NA # Or appropriate default
-        return processed_df.reindex(columns=expected_cols)
-
-    # Ensure new_records_df has the expected schema before concatenation,
-    # though this should ideally be handled before calling this function.
-    # For robustness, we can re-apply it here on a copy of new_records_df.
-    df_to_add_prepared = new_records_df.copy()
+    # Ensure current_df_entreprises has the expected schema
+    current_df_processed = current_df_entreprises.copy()
     for col in expected_cols:
-        if col not in df_to_add_prepared.columns:
-            df_to_add_prepared[col] = pd.NA
-    df_to_add_prepared = df_to_add_prepared.reindex(columns=expected_cols)
+        if col not in current_df_processed.columns:
+            current_df_processed[col] = pd.NA # Use pd.NA for missing values, pandas will handle dtype
+    current_df_processed = current_df_processed.reindex(columns=expected_cols)
+
+    # Ensure new_records_df has the expected schema
+    new_records_processed = new_records_df.copy()
+    for col in expected_cols:
+        if col not in new_records_processed.columns:
+            new_records_processed[col] = pd.NA
+    new_records_processed = new_records_processed.reindex(columns=expected_cols)
+
+    if new_records_processed.empty:
+        # If there are no new records to add, return the processed current DataFrame
+        return current_df_processed
 
     # Concatenate
-    combined_df = pd.concat([current_df_entreprises, df_to_add_prepared], ignore_index=True)
+    combined_df = pd.concat([current_df_processed, new_records_processed], ignore_index=True)
     
-    # Drop duplicates
-    if 'SIRET' in combined_df.columns:
+    # Drop duplicates, prioritizing the newly added records ('last')
+    # Only attempt drop_duplicates if 'SIRET' is present and DataFrame is not empty
+    if 'SIRET' in combined_df.columns and not combined_df.empty:
+        # Fill NA in SIRET column before dropping duplicates to avoid issues with pd.NA comparison if any
+        # However, SIRET is expected to be non-null for valid records.
+        # If SIRET can be legitimately NA and these rows should be kept, this needs adjustment.
+        # For now, assuming SIRET is a key that should exist.
         combined_df.drop_duplicates(subset=['SIRET'], keep='last', inplace=True)
     
-    # Final schema enforcement (ensure all expected columns and order)
-    # This also handles adding any expected_cols that might have been dropped if combined_df became empty
-    # or if SIRET was missing and drop_duplicates wasn't effective.
-    final_df = pd.DataFrame(columns=expected_cols) # Start with a clean slate for columns
-    if not combined_df.empty:
-        for col in expected_cols:
-            if col in combined_df.columns:
-                final_df[col] = combined_df[col]
-            else:
-                final_df[col] = pd.NA
-    else: # If combined_df is empty (e.g. current_df was empty, new_records was empty)
-        for col in expected_cols:
-            final_df[col] = pd.NA # Ensure schema on empty df
-
-    return final_df.reindex(columns=expected_cols)
+    # Ensure final schema again, mainly for column order and if combined_df became unexpectedly empty
+    # or if drop_duplicates removed all rows.
+    combined_df = combined_df.reindex(columns=expected_cols)
+    
+    return combined_df
 
 # Add this function to data_utils.py
 # Ensure pandas as pd and numpy as np (for pd.NA) are imported if not already.
