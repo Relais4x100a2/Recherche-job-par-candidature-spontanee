@@ -1,28 +1,40 @@
 import streamlit as st
 import auth_utils # Import the new authentication utility
 import pandas as pd # Ensure pandas is imported
+import datetime # Ensure datetime is imported for logging
+
+# --- SCRIPT START LOG ---
+print(f"{datetime.datetime.now()} - INFO - app.py script started.")
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(layout="wide")
 
 # --- INITIALISATION DE L'ÉTAT DE SESSION POUR L'AUTHENTIFICATION ET CRM ---
+print(f"{datetime.datetime.now()} - INFO - Initializing session state variables.")
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
+    print(f"{datetime.datetime.now()} - INFO - Session state 'authenticated' initialized to False.")
 if 'username' not in st.session_state:
     st.session_state.username = ""
+    print(f"{datetime.datetime.now()} - INFO - Session state 'username' initialized to empty string.")
 if 'crm_data' not in st.session_state:
     st.session_state.crm_data = {"entreprises": [], "contacts": [], "actions": []}
+    print(f"{datetime.datetime.now()} - INFO - Session state 'crm_data' initialized to empty lists.")
 if 'df_entreprises' not in st.session_state:
     st.session_state.df_entreprises = pd.DataFrame()
+    print(f"{datetime.datetime.now()} - INFO - Session state 'df_entreprises' initialized to empty DataFrame.")
 if 'df_contacts' not in st.session_state:
     st.session_state.df_contacts = pd.DataFrame()
+    print(f"{datetime.datetime.now()} - INFO - Session state 'df_contacts' initialized to empty DataFrame.")
 if 'df_actions' not in st.session_state:
     st.session_state.df_actions = pd.DataFrame()
+    print(f"{datetime.datetime.now()} - INFO - Session state 'df_actions' initialized to empty DataFrame.")
 if 'confirm_flush' not in st.session_state: # New session state for flush confirmation
     st.session_state.confirm_flush = False
+    print(f"{datetime.datetime.now()} - INFO - Session state 'confirm_flush' initialized to False.")
 
 import pydeck as pdk
-import datetime
+# import datetime # Already imported above
 
 # Importer les modules locaux
 import config
@@ -59,11 +71,14 @@ if not st.session_state.authenticated:
     login_username = st.sidebar.text_input("Nom d'utilisateur", key="login_username_main")
     login_password = st.sidebar.text_input("Mot de passe", type="password", key="login_password_main")
     if st.sidebar.button("Se connecter", key="login_button_main"):
+        print(f"{datetime.datetime.now()} - INFO - Login attempt for user: {login_username}.")
         if auth_utils.verify_user(login_username, login_password):
             st.session_state.authenticated = True
             st.session_state.username = login_username
+            print(f"{datetime.datetime.now()} - INFO - User '{login_username}' logged in successfully.")
             
             # Charger les données CRM spécifiques à l'utilisateur
+            print(f"{datetime.datetime.now()} - INFO - Loading CRM data for user '{login_username}'.")
             st.session_state.crm_data = auth_utils.load_user_crm_data(st.session_state.username)
             
             # Load initial DataFrames
@@ -82,10 +97,12 @@ if not st.session_state.authenticated:
 
             st.rerun()
         else:
+            print(f"{datetime.datetime.now()} - WARNING - Failed login attempt for user: {login_username}.")
             st.sidebar.error("Nom d'utilisateur ou mot de passe incorrect.")
 else:
     st.sidebar.success(f"Connecté en tant que : {st.session_state.username}")
     if st.sidebar.button("Se déconnecter", key="logout_button_main"):
+        logged_out_username = st.session_state.username
         st.session_state.authenticated = False
         st.session_state.username = ""
         # Effacer les données CRM de la session lors de la déconnexion
@@ -93,6 +110,7 @@ else:
         st.session_state.df_entreprises = pd.DataFrame()
         st.session_state.df_contacts = pd.DataFrame()
         st.session_state.df_actions = pd.DataFrame()
+        print(f"{datetime.datetime.now()} - INFO - User '{logged_out_username}' logged out.")
         st.rerun()
 
 # Affichage du contenu principal ou du message de connexion
@@ -326,13 +344,18 @@ else:
             # 1. Géocodage
             coordonnees = geo_utils.geocoder_ban_france(adresse_input)
             if coordonnees is None:
+                print(f"{datetime.datetime.now()} - ERROR - Geocoding failed for address: {adresse_input}.")
                 st.stop()
             lat_centre, lon_centre = coordonnees
+            print(f"{datetime.datetime.now()} - INFO - Geocoding successful for address: {adresse_input} -> Lat: {lat_centre}, Lon: {lon_centre}.")
 
             # 2. Lancer la recherche API
+            print(f"{datetime.datetime.now()} - INFO - Preparing to call API rechercher_geographiquement_entreprises.")
+            print(f"{datetime.datetime.now()} - INFO - API Params: adresse_input='{adresse_input}', radius_input={radius_input}, final_codes_for_api='{final_api_params['activite_principale']}', selected_effectifs_codes='{st.session_state.selected_effectifs_codes}'.")
             entreprises_trouvees = api_client.rechercher_geographiquement_entreprises(
                 lat_centre, lon_centre, radius_input, final_api_params
             )
+            print(f"{datetime.datetime.now()} - INFO - API call completed. Number of raw results received: {len(entreprises_trouvees) if entreprises_trouvees is not None else 'Error/None'}.")
 
             # --- Traitement et Affichage des résultats ---
             if entreprises_trouvees is not None:
@@ -341,6 +364,7 @@ else:
                     entreprises_trouvees,
                     st.session_state.selected_effectifs_codes
                 )
+                print(f"{datetime.datetime.now()} - INFO - API results processed. Number of filtered establishments: {len(df_resultats)}.")
                 st.success(f"📊 {len(df_resultats)} établissements trouvés correspondant à tous les critères.")
 
                 if not df_resultats.empty:
@@ -484,6 +508,7 @@ else:
                 
                 # Identifier les nouvelles entreprises
                 df_new_entreprises = df_resultats[~df_resultats['SIRET'].isin(sirets_in_crm)].copy() # Use .copy() to avoid SettingWithCopyWarning
+                print(f"{datetime.datetime.now()} - INFO - Identified {len(df_new_entreprises)} new entreprises not in CRM.")
 
                 if not df_new_entreprises.empty:
                     st.write(f"{len(df_new_entreprises)} nouvelles entreprises trouvées (non présentes dans votre CRM) :")
@@ -492,6 +517,7 @@ else:
                     st.dataframe(df_new_entreprises[['Nom complet', 'SIRET', 'Adresse établissement', 'Activité NAF/APE Etablissement']].head())
 
                     if st.button(f"➕ Ajouter les {len(df_new_entreprises)} nouvelles entreprises à mon CRM", key="add_new_to_crm"):
+                        print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' clicked 'Ajouter les {len(df_new_entreprises)} nouvelles entreprises à mon CRM'.")
                         # Colonnes attendues dans le CRM (déjà définies dans l'onglet Entreprises)
                         expected_entreprise_cols = [
                             'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE établissement', 
@@ -528,6 +554,7 @@ else:
                             df_to_add,                      # new_records_df
                             expected_entreprise_cols        # expected_cols
                         )
+                        print(f"{datetime.datetime.now()} - INFO - Added {len(df_to_add)} new entreprises to session state df_entreprises. New total: {len(st.session_state.df_entreprises)}.")
                         
                         st.write("--- DEBUG: After calling add_entreprise_records ---")
                         st.write(f"Shape of updated st.session_state.df_entreprises: {st.session_state.df_entreprises.shape if not st.session_state.df_entreprises.empty else 'N/A or Empty'}")
@@ -538,6 +565,7 @@ else:
                         st.rerun()
                 
                 elif not df_resultats.empty: # df_resultats n'est pas vide, mais df_new_entreprises l'est
+                    print(f"{datetime.datetime.now()} - INFO - No new entreprises to add to CRM from search results.")
                     st.info("✔️ Toutes les entreprises trouvées dans cette recherche sont déjà dans votre CRM ou la recherche n'a pas retourné de nouvelles entreprises.")
 
 
@@ -553,6 +581,7 @@ else:
     with col_save_crm:
         st.write("DEBUG: Inside 'with col_save_crm'. Before main save button definition.") # Restored debug line
         if st.button("💾 Sauvegarder les modifications CRM", key="save_crm_button"):
+            print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' clicked 'Sauvegarder les modifications CRM'.")
             # Get data formatted for saving from the utility function
             crm_data_to_save = data_utils.get_crm_data_for_saving()
 
@@ -561,6 +590,7 @@ else:
             st.info(f"Number of entreprises to save: {len(crm_data_to_save['entreprises'])}")
             st.info(f"Number of contacts to save: {len(crm_data_to_save['contacts'])}")
             st.info(f"Number of actions to save: {len(crm_data_to_save['actions'])}")
+            print(f"{datetime.datetime.now()} - INFO - Saving CRM data for user '{st.session_state.username}': {len(crm_data_to_save['entreprises'])} entreprises, {len(crm_data_to_save['contacts'])} contacts, {len(crm_data_to_save['actions'])} actions.")
             
             # Need to import auth_utils at the top of app.py if not already done for this direct call,
             # but it should be imported as it's used elsewhere.
@@ -580,6 +610,11 @@ else:
             # Optionnel: st.rerun() # Peut être ajouté si on veut forcer une relecture des données depuis le fichier après sauvegarde
 
     with col_download_user_crm:
+        # Adding a check for the button click to log it
+        download_button_key = 'download_user_crm_excel_button' # Key used in st.download_button
+        # We can't directly detect the click on st.download_button in the same way as st.button.
+        # However, the data preparation for it implies intent.
+        print(f"{datetime.datetime.now()} - INFO - Preparing data for user CRM download for user '{st.session_state.username}'.")
         try:
             # Prépare les données pour le téléchargement du CRM utilisateur
             # La fonction generate_user_crm_excel s'attend à des DataFrames.
@@ -606,6 +641,7 @@ else:
     # --- Zone Dangereuse: Vider le CRM ---
     st.subheader("⚠️ Zone Dangereuse")
     if st.button("Vider toutes mes données CRM", key="flush_crm_data_button"):
+        print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' initiated 'Vider toutes mes données CRM'. Setting confirm_flush to True.")
         st.session_state.confirm_flush = True
         st.rerun() # Rerun to show confirmation
 
@@ -614,6 +650,7 @@ else:
         col1_flush, col2_flush = st.columns(2)
         with col1_flush:
             if st.button("Oui, supprimer tout", key="confirm_flush_yes", type="primary"):
+                print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' confirmed CRM data flush.")
                 expected_entreprise_cols = [
                     'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE établissement', 
                     'Adresse établissement', 'Nb salariés établissement', 'Est siège social', 
@@ -643,16 +680,19 @@ else:
                     "actions": []
                 }
                 auth_utils.save_user_crm_data(st.session_state.username, crm_data_to_save)
+                print(f"{datetime.datetime.now()} - INFO - CRM data for user '{st.session_state.username}' flushed and saved (empty state).")
                 
                 st.success("Toutes vos données CRM ont été supprimées.")
                 st.session_state.confirm_flush = False
                 st.rerun()
         with col2_flush:
             if st.button("Non, annuler", key="confirm_flush_no"):
+                print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' cancelled CRM data flush.")
                 st.session_state.confirm_flush = False
                 st.rerun()
     
     st.divider() # Visuel separator before tabs
+    print(f"{datetime.datetime.now()} - INFO - Preparing to display CRM tabs for user '{st.session_state.username}'.")
     tab_entreprises, tab_contacts, tab_actions = st.tabs([
         "Mon CRM - Entreprises", 
         "Mon CRM - Contacts", 
@@ -661,6 +701,7 @@ else:
 
     with tab_entreprises:
         st.subheader("Mes Entreprises Sauvegardées")
+        print(f"{datetime.datetime.now()} - INFO - Loading 'Entreprises' tab. Number of entreprises: {len(st.session_state.df_entreprises)}.")
 
         # Define expected columns for consistency (this will be global now)
         # expected_entreprise_cols = [
@@ -762,15 +803,18 @@ else:
                 st.session_state.df_entreprises = edited_df_entreprises[~rows_to_delete_mask].drop(columns=["Supprimer ?"], errors='ignore')
                 
                 if num_rows_to_delete > 0:
+                    print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' marked {num_rows_to_delete} entreprise(s) for deletion.")
                     st.toast(f"{num_rows_to_delete} entreprise(s) marquée(s) pour suppression et retirée(s) de la vue. N'oubliez pas de sauvegarder les changements globaux du CRM.")
             else:
                  st.session_state.df_entreprises = edited_df_entreprises # Should not happen if "Supprimer ?" was added
 
         # Ensure final schema using the utility function
         st.session_state.df_entreprises = data_utils.ensure_df_schema(st.session_state.df_entreprises, EXPECTED_ENTREPRISE_COLS)
+        print(f"{datetime.datetime.now()} - INFO - Finished processing 'Entreprises' tab. Current count: {len(st.session_state.df_entreprises)}.")
 
     with tab_contacts:
         st.subheader("Mes Contacts")
+        print(f"{datetime.datetime.now()} - INFO - Loading 'Contacts' tab. Number of contacts: {len(st.session_state.df_contacts)}.")
 
         # expected_contact_cols = [
         #     'Prénom Nom', 'Entreprise', 'Poste', 'Direction', 
@@ -853,15 +897,18 @@ else:
                 st.session_state.df_contacts = edited_df_contacts[~rows_to_delete_mask_contacts].drop(columns=["Supprimer ?"], errors='ignore')
                 
                 if num_rows_to_delete_contacts > 0:
-                    st.toast(f"{num_rows_to_delete_contacts} contact(s) marqué(s) pour suppression et retiré(s) de la vue. N'oubliez pas de sauvegarder les changements globaux du CRM.")
+                    print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' marked {num_rows_to_delete_contacts} contact(s) for deletion.")
+                    st.toast(f"{num_rows_to_delete_contacts} contact(s) marqué(s) pour suppression et retirée(s) de la vue. N'oubliez pas de sauvegarder les changements globaux du CRM.")
             else:
                 st.session_state.df_contacts = edited_df_contacts
 
         # Ensure final schema using the utility function
         st.session_state.df_contacts = data_utils.ensure_df_schema(st.session_state.df_contacts, EXPECTED_CONTACT_COLS)
+        print(f"{datetime.datetime.now()} - INFO - Finished processing 'Contacts' tab. Current count: {len(st.session_state.df_contacts)}.")
 
     with tab_actions:
         st.subheader("Mes Actions et Suivis")
+        print(f"{datetime.datetime.now()} - INFO - Loading 'Actions' tab. Number of actions: {len(st.session_state.df_actions)}.")
 
         # expected_action_cols = [
         #     'Entreprise', 'Contact (Prénom Nom)', 'Type Action', 'Date Action', 
@@ -949,6 +996,7 @@ else:
                 st.session_state.df_actions = edited_df_actions[~rows_to_delete_mask_actions].drop(columns=["Supprimer ?"], errors='ignore')
                 
                 if num_rows_to_delete_actions > 0:
+                    print(f"{datetime.datetime.now()} - INFO - User '{st.session_state.username}' marked {num_rows_to_delete_actions} action(s) for deletion.")
                     st.toast(f"{num_rows_to_delete_actions} action(s) marquée(s) pour suppression et retirée(s) de la vue. N'oubliez pas de sauvegarder les changements globaux du CRM.")
             else:
                 st.session_state.df_actions = edited_df_actions
@@ -958,3 +1006,4 @@ else:
         # Coerce 'Date Action' to datetime after schema is ensured, as data_editor might change its type
         if 'Date Action' in st.session_state.df_actions.columns:
              st.session_state.df_actions['Date Action'] = pd.to_datetime(st.session_state.df_actions['Date Action'], errors='coerce')
+        print(f"{datetime.datetime.now()} - INFO - Finished processing 'Actions' tab. Current count: {len(st.session_state.df_actions)}.")
