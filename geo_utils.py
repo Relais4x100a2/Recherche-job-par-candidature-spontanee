@@ -23,8 +23,7 @@ def geocoder_ban_france(adresse):
 
         if location:
             print(f"{datetime.datetime.now()} - INFO - Location found for '{adresse}': {location.address} | Lat: {location.latitude}, Lon: {location.longitude}")
-            st.success(f"Adresse trouvée : {location.address}")
-            st.info(f"Coordonnées utilisées : Latitude={location.latitude:.6f}, Longitude={location.longitude:.6f}")
+            st.success(f"Adresse trouvée : {location.address} - Coordonnées utilisées : Latitude={location.latitude:.6f}, Longitude={location.longitude:.6f}")
             return location.latitude, location.longitude
         else:
             print(f"{datetime.datetime.now()} - WARNING - Location not found for address: '{adresse}'")

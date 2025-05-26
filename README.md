@@ -16,7 +16,7 @@ Cette application Streamlit permet de rechercher des entreprises dans un rayon g
     *   Légende pour la carte.
 *   **Exports :**
     *   **CSV :** Téléchargez les résultats détaillés dans un fichier CSV (séparateur point-virgule).
-    *   **Excel CRM :** Téléchargez un classeur Excel (`.xlsx`) pré-formaté pour le suivi des candidatures, contenant 3 feuilles :
+    *   **Excel ERM :** Téléchargez un classeur Excel (`.xlsx`) pré-formaté pour le suivi des candidatures, contenant 3 feuilles :
         1.  `Entreprises` : Liste des entreprises/établissements trouvés.
         2.  `Contacts` : Feuille vide pour ajouter manuellement des contacts (avec validation pour lier le SIRET à la feuille `Entreprises`).
         3.  `Actions` : Feuille vide pour suivre les actions (avec validation pour lier le SIRET et l'ID Contact, et listes déroulantes pour Type/Statut).
@@ -62,7 +62,7 @@ Cette application Streamlit permet de rechercher des entreprises dans un rayon g
 recherche_job_candidature_spontanée/
 ├── app.py                 # Point d'entrée principal de l'application Streamlit, gère l'UI et l'orchestration
 ├── config.py              # Constantes (limites API, chemins), dictionnaires (NAF, effectifs, couleurs)
-├── data_utils.py          # Fonctions pour charger/traiter NAF.csv, traiter la réponse API, générer l'Excel CRM
+├── data_utils.py          # Fonctions pour charger/traiter NAF.csv, traiter la réponse API, générer l'Excel ERM
 ├── api_client.py          # Fonctions pour interagir avec l'API Recherche d'entreprises (appels, rate limiting)
 ├── geo_utils.py           # Fonction pour le géocodage via l'API Adresse (BAN)
 ├── NAF.csv                # Fichier de données des codes NAF
