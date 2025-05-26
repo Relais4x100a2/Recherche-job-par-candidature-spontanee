@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 from functools import lru_cache
-import datetime
+import datetime as dt # Aliased for convenience
 from io import BytesIO
 # Removed: import openpyxl - pandas uses it via ExcelWriter, direct use not strictly needed if formulas written via pandas/xlsxwriter methods
 from openpyxl.worksheet.datavalidation import DataValidation
@@ -17,42 +17,55 @@ import config
 @st.cache_data # Utiliser le cache Streamlit pour le chargement initial
 def load_naf_dictionary(file_path=config.NAF_FILE_PATH):
     """Charge le fichier NAF et retourne un dictionnaire Code -> Libellé."""
-    try:
+    print(f"{dt.datetime.now()} - INFO - Loading NAF dictionary from file_path: {file_path}")
+    attempts = [
+        {'sep': ',', 'encoding': 'utf-8'},
+        {'sep': ';', 'encoding': 'utf-8'},
+        {'sep': ',', 'encoding': 'latin-1'},
+        {'sep': ';', 'encoding': 'latin-1'}
+    ]
+    df_naf = None
+    for attempt in attempts:
+        print(f"{dt.datetime.now()} - INFO - Attempting to read NAF CSV with sep='{attempt['sep']}' and encoding='{attempt['encoding']}'")
         try:
-            df_naf = pd.read_csv(file_path, sep=',', dtype={'Code': str}, encoding='utf-8')
-            if 'Code' not in df_naf.columns or 'Libellé' not in df_naf.columns:
-                 raise ValueError("Colonnes 'Code' ou 'Libellé' manquantes avec sep=','")
-        except (ValueError, pd.errors.ParserError, UnicodeDecodeError):
-            try:
-                df_naf = pd.read_csv(file_path, sep=';', dtype={'Code': str}, encoding='utf-8')
-                if 'Code' not in df_naf.columns or 'Libellé' not in df_naf.columns:
-                    raise ValueError("Colonnes 'Code' ou 'Libellé' manquantes avec sep=';'")
-            except (ValueError, pd.errors.ParserError, UnicodeDecodeError):
-                try:
-                     df_naf = pd.read_csv(file_path, sep=',', dtype={'Code': str}, encoding='latin-1')
-                     if 'Code' not in df_naf.columns or 'Libellé' not in df_naf.columns:
-                         raise ValueError("Colonnes 'Code' ou 'Libellé' manquantes avec sep=',', latin-1")
-                except (ValueError, pd.errors.ParserError, UnicodeDecodeError):
-                     df_naf = pd.read_csv(file_path, sep=';', dtype={'Code': str}, encoding='latin-1')
-                     if 'Code' not in df_naf.columns or 'Libellé' not in df_naf.columns:
-                         st.error(f"Colonnes 'Code' et 'Libellé' introuvables dans {file_path} avec les séparateurs et encodages testés.")
-                         return None
-        if df_naf.empty:
-            st.error(f"Le fichier NAF '{file_path}' est vide ou n'a pas pu être lu correctement.")
+            df_naf_current = pd.read_csv(file_path, sep=attempt['sep'], dtype={'Code': str}, encoding=attempt['encoding'])
+            if 'Code' in df_naf_current.columns and 'Libellé' in df_naf_current.columns:
+                print(f"{dt.datetime.now()} - INFO - NAF CSV read successfully with sep='{attempt['sep']}', encoding='{attempt['encoding']}'.")
+                df_naf = df_naf_current
+                break
+            else:
+                print(f"{dt.datetime.now()} - WARNING - NAF CSV read with sep='{attempt['sep']}', encoding='{attempt['encoding']}', but 'Code' or 'Libellé' column missing.")
+        except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as e:
+            print(f"{dt.datetime.now()} - WARNING - Failed to read NAF CSV with sep='{attempt['sep']}', encoding='{attempt['encoding']}': {e}")
+        except FileNotFoundError:
+            print(f"{dt.datetime.now()} - ERROR - NAF file not found at path: {file_path}")
+            st.error(f"Erreur critique : Le fichier NAF '{file_path}' est introuvable. Vérifiez le chemin.")
             return None
+        except pd.errors.EmptyDataError:
+            print(f"{dt.datetime.now()} - ERROR - NAF file is empty at path: {file_path}")
+            st.error(f"Erreur critique : Le fichier NAF '{file_path}' est vide.")
+            return None
+
+    if df_naf is None:
+        print(f"{dt.datetime.now()} - ERROR - Could not find 'Code' and 'Libellé' columns in {file_path} with any attempted separator/encoding.")
+        st.error(f"Colonnes 'Code' et 'Libellé' introuvables dans {file_path} avec les séparateurs et encodages testés.")
+        return None
+
+    if df_naf.empty:
+        print(f"{dt.datetime.now()} - WARNING - NAF file '{file_path}' is empty or could not be read correctly.")
+        st.error(f"Le fichier NAF '{file_path}' est vide ou n'a pas pu être lu correctement.")
+        return None
+
+    try:
         df_naf.columns = df_naf.columns.str.strip()
         df_naf['Code'] = df_naf['Code'].astype(str).str.strip()
         if df_naf['Code'].duplicated().any():
             df_naf = df_naf.drop_duplicates(subset='Code', keep='last')
         naf_dict = df_naf.set_index('Code')['Libellé'].to_dict()
+        print(f"{dt.datetime.now()} - INFO - NAF dictionary loaded successfully with {len(naf_dict)} codes.")
         return naf_dict
-    except FileNotFoundError:
-        st.error(f"Erreur critique : Le fichier NAF '{file_path}' est introuvable. Vérifiez le chemin.")
-        return None
-    except pd.errors.EmptyDataError:
-        st.error(f"Erreur critique : Le fichier NAF '{file_path}' est vide.")
-        return None
     except Exception as e:
+        print(f"{dt.datetime.now()} - ERROR - Critical error during NAF file processing from '{file_path}': {e}")
         st.error(f"Erreur critique lors du chargement du fichier NAF '{file_path}': {e}")
         return None
 
@@ -60,26 +73,50 @@ naf_detailed_lookup = load_naf_dictionary()
 
 @lru_cache(maxsize=None)
 def get_section_for_code(code):
-    if not code or not isinstance(code, str): return None
+    if not code or not isinstance(code, str):
+        # print(f"{dt.datetime.now()} - DEBUG - get_section_for_code: Invalid input code '{code}'. Returning None.")
+        return None
     code_cleaned = code.strip().replace('.', '')[:2]
-    return config.NAF_SECTION_MAP.get(code_cleaned)
+    section = config.NAF_SECTION_MAP.get(code_cleaned)
+    # if not section:
+    #     print(f"{dt.datetime.now()} - DEBUG - get_section_for_code: No section found for code '{code}' (cleaned: '{code_cleaned}').")
+    return section
 
 @lru_cache(maxsize=None)
 def get_codes_for_section(section_letter):
-    if not naf_detailed_lookup or not section_letter: return []
+    if not naf_detailed_lookup:
+        # print(f"{dt.datetime.now()} - DEBUG - get_codes_for_section: NAF dictionary not loaded. Returning empty list for section '{section_letter}'.")
+        return []
+    if not section_letter:
+        # print(f"{dt.datetime.now()} - DEBUG - get_codes_for_section: Invalid input section_letter '{section_letter}'. Returning empty list.")
+        return []
     codes = [code for code in naf_detailed_lookup if get_section_for_code(code) == section_letter]
+    # if not codes:
+    #     print(f"{dt.datetime.now()} - DEBUG - get_codes_for_section: No codes found for section '{section_letter}'.")
     return sorted(codes)
 
 def correspondance_NAF(code_naf_input):
-    if naf_detailed_lookup is None: return f"{code_naf_input} (Dico NAF non chargé)"
-    if not code_naf_input or not isinstance(code_naf_input, str): return "Code NAF invalide"
+    print(f"{dt.datetime.now()} - DEBUG - correspondance_NAF called with code_naf_input: '{code_naf_input}'.")
+    if naf_detailed_lookup is None:
+        print(f"{dt.datetime.now()} - WARNING - correspondance_NAF: NAF dictionary not loaded. Input: '{code_naf_input}'.")
+        return f"{code_naf_input} (Dico NAF non chargé)"
+    if not code_naf_input or not isinstance(code_naf_input, str):
+        print(f"{dt.datetime.now()} - WARNING - correspondance_NAF: Invalid code_naf_input '{code_naf_input}'.")
+        return "Code NAF invalide"
     code_naf_clean = code_naf_input.strip()
-    return naf_detailed_lookup.get(code_naf_clean, f"{code_naf_clean} (Libellé non trouvé)")
+    libelle = naf_detailed_lookup.get(code_naf_clean)
+    if libelle is None:
+        print(f"{dt.datetime.now()} - WARNING - correspondance_NAF: Code '{code_naf_clean}' not found in NAF dictionary.")
+        return f"{code_naf_clean} (Libellé non trouvé)"
+    return libelle
 
 def traitement_reponse_api(entreprises, selected_effectifs_codes):
+    print(f"{dt.datetime.now()} - INFO - traitement_reponse_api called. Number of entreprises in input: {len(entreprises) if entreprises else 0}. Selected effectifs codes: {selected_effectifs_codes}")
     if not entreprises: return pd.DataFrame()
     all_etablissements_data = []
     processed_sirens = set()
+    num_etablissements_processed = 0
+    num_etablissements_matched = 0
     for entreprise in entreprises:
         siren = entreprise.get('siren')
         nom_complet = entreprise.get('nom_complet')
@@ -102,14 +139,16 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
                         ca_latest = latest_year_data.get("ca")
                         resultat_net_latest = latest_year_data.get("resultat_net")
                 except Exception as e:
-                    print(f"Avertissement: Erreur extraction finances pour SIREN {siren}: {e}")
+                    print(f"{dt.datetime.now()} - WARNING - Error extracting financial data for SIREN {siren}: {e}")
                     latest_year_str = 'Erreur'
         matching_etablissements = entreprise.get('matching_etablissements', [])
         for etab in matching_etablissements:
+            num_etablissements_processed += 1
             etat_etab = etab.get('etat_administratif')
             tranche_eff_etab = etab.get('tranche_effectif_salarie')
             selected_effectifs_codes_set = set(selected_effectifs_codes) if not isinstance(selected_effectifs_codes, set) else selected_effectifs_codes
             if etat_etab == 'A' and tranche_eff_etab in selected_effectifs_codes_set:
+                num_etablissements_matched += 1
                 all_etablissements_data.append({
                     'SIRET': etab.get('siret'), 'SIREN': siren,
                     'tranche_effectif_salarie_etablissement': tranche_eff_etab,
@@ -122,7 +161,10 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
                     'code_naf_entreprise': code_naf_entreprise, 'tranche_desc_entreprise': tranche_description_entreprise,
                     'annee_finances': latest_year_str, 'ca_entreprise': ca_latest, 'resultat_net_entreprise': resultat_net_latest,
                 })
-    if not all_etablissements_data: return pd.DataFrame()
+    print(f"{dt.datetime.now()} - INFO - traitement_reponse_api: Processed SIRENs: {len(processed_sirens)}. Total establishments processed: {num_etablissements_processed}. Matched establishments: {num_etablissements_matched}.")
+    if not all_etablissements_data:
+        print(f"{dt.datetime.now()} - INFO - traitement_reponse_api: No establishments matched criteria. Returning empty DataFrame.")
+        return pd.DataFrame()
     df_filtered = pd.DataFrame(all_etablissements_data)
     df_filtered['Activité NAF/APE Entreprise'] = df_filtered['code_naf_entreprise'].apply(lambda x: correspondance_NAF(x) if pd.notna(x) and x != 'nan' else 'N/A')
     df_filtered['Activité NAF/APE Etablissement'] = df_filtered['code_naf_etablissement'].apply(lambda x: correspondance_NAF(x) if pd.notna(x) and x != 'nan' else 'N/A')
@@ -144,7 +186,9 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
         'tranche_desc_entreprise': 'Nb salariés entreprise', 'annee_finances': 'Année Finances Entreprise',
     })
     cols_existantes = [col for col in config.COLS_EXPORT_ORDER if col in final_df.columns]
-    return final_df[cols_existantes]
+    final_df_result = final_df[cols_existantes]
+    print(f"{dt.datetime.now()} - INFO - traitement_reponse_api: Final DataFrame has {len(final_df_result)} rows.")
+    return final_df_result
 
 def generate_crm_excel(df_entreprises_input: pd.DataFrame):
     """
@@ -157,12 +201,15 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
     Returns:
         bytes: Le contenu binaire du fichier Excel, ou None en cas d'erreur.
     """
+    print(f"{dt.datetime.now()} - INFO - generate_crm_excel called. Input df_entreprises_input shape: {df_entreprises_input.shape}")
     output = BytesIO()
     try:
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             workbook = writer.book # Get the openpyxl workbook object
+            print(f"{dt.datetime.now()} - INFO - ExcelWriter created, workbook obtained.")
 
             # 1. DATA_IMPORT Sheet
+            print(f"{dt.datetime.now()} - INFO - Creating DATA_IMPORT sheet.")
             data_import_cols = [
                 'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE Etablissement', 
                 'code_naf_etablissement', 'Activité NAF/APE Entreprise', 'code_naf_entreprise', 
@@ -180,8 +227,10 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
             df_data_import = df_data_import[data_import_cols] # Ensure correct order
             df_data_import.to_excel(writer, sheet_name='DATA_IMPORT', index=False, freeze_panes=(1, 0))
             num_data_rows = len(df_data_import)
+            print(f"{dt.datetime.now()} - INFO - DATA_IMPORT sheet created with {num_data_rows} rows.")
 
             # 2. ENTREPRISES Sheet
+            print(f"{dt.datetime.now()} - INFO - Creating ENTREPRISES sheet with formulas.")
             entreprises_headers = [
                 'SIRET', 'Nom complet', 'Enseignes', 'Activité NAF/APE établissement', 
                 'Adresse établissement', 'Recherche LinkedIn', 'Recherche Google Maps', 
@@ -248,6 +297,7 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
             df_actions.to_excel(writer, sheet_name='ACTIONS', index=False, freeze_panes=(1, 0))
 
             # 6. Data Validation
+            print(f"{dt.datetime.now()} - INFO - Setting up data validations.")
             max_row_validation = 5000
             
             # CONTACTS Sheet Validations
@@ -295,8 +345,10 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
             dv_actions_opportunite.errorTitle = "Statut Opportunité Invalide"
             ws_actions.add_data_validation(dv_actions_opportunite)
             dv_actions_opportunite.add(f"G2:G{max_row_validation}")
+            print(f"{dt.datetime.now()} - INFO - Data validations set up.")
 
             # 7. Formatting: Auto-adjust column widths
+            print(f"{dt.datetime.now()} - INFO - Adjusting column widths.")
             for sheet_name in workbook.sheetnames:
                 sheet = workbook[sheet_name]
                 for col_idx, column in enumerate(sheet.columns): # openpyxl columns are 0-indexed here
@@ -381,10 +433,13 @@ def generate_crm_excel(df_entreprises_input: pd.DataFrame):
                     final_ordered_sheets.append(workbook[title])
             
             workbook._sheets = final_ordered_sheets
+            print(f"{dt.datetime.now()} - INFO - Sheet order set.")
 
 
         # End of `with pd.ExcelWriter` block, writer is saved here.
+        print(f"{dt.datetime.now()} - INFO - Excel file generation complete. Returning output.")
     except Exception as e:
+        print(f"{dt.datetime.now()} - ERROR - Exception during Excel generation: {e}")
         st.error(f"Une erreur est survenue lors de la génération du fichier Excel : {e}")
         import traceback
         st.error(traceback.format_exc()) # For more detailed debugging
@@ -398,12 +453,16 @@ def generate_user_crm_excel(df_entreprises: pd.DataFrame, df_contacts: pd.DataFr
     """
     Génère un fichier Excel (.xlsx) à partir des DataFrames CRM de l'utilisateur.
     """
+    print(f"{dt.datetime.now()} - INFO - generate_user_crm_excel called.")
+    print(f"{dt.datetime.now()} - INFO - Input df_entreprises shape: {df_entreprises.shape}, df_contacts shape: {df_contacts.shape}, df_actions shape: {df_actions.shape}")
     output = BytesIO()
     try:
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             workbook = writer.book
+            print(f"{dt.datetime.now()} - INFO - ExcelWriter created for user CRM export.")
 
             # 1. DATA_IMPORT Sheet (from df_entreprises, but only relevant columns)
+            print(f"{dt.datetime.now()} - INFO - Creating DATA_IMPORT sheet for user CRM.")
             # These are typically columns that might come from an initial API search or import,
             # excluding user-added notes or statuses if they are not part of the "raw" data concept.
             # For this version, we'll include most columns from df_entreprises but ensure
@@ -500,6 +559,7 @@ def generate_user_crm_excel(df_entreprises: pd.DataFrame, df_contacts: pd.DataFr
             df_actions_sheet.to_excel(writer, sheet_name='ACTIONS', index=False, freeze_panes=(1, 0))
             
             # 6. Data Validation (similar to generate_crm_excel)
+            print(f"{dt.datetime.now()} - INFO - Setting up data validations for user CRM export.")
             max_row_validation = 5000 # Consistent with other function
             
             # CONTACTS Sheet Validations
@@ -535,8 +595,10 @@ def generate_user_crm_excel(df_entreprises: pd.DataFrame, df_contacts: pd.DataFr
             dv_actions_opportunite = DataValidation(type="list", formula1=f"=VALEURS_LISTE!$D$2:$D${max_row_validation}", allow_blank=True)
             ws_actions.add_data_validation(dv_actions_opportunite)
             dv_actions_opportunite.add(f"G2:G{max_row_validation}")
+            print(f"{dt.datetime.now()} - INFO - Data validations set up for user CRM export.")
 
             # 7. Formatting: Auto-adjust column widths
+            print(f"{dt.datetime.now()} - INFO - Adjusting column widths for user CRM export.")
             for sheet_name in workbook.sheetnames:
                 sheet = workbook[sheet_name]
                 for col_idx, column_cells in enumerate(sheet.columns):
@@ -589,15 +651,18 @@ def generate_user_crm_excel(df_entreprises: pd.DataFrame, df_contacts: pd.DataFr
                 if title not in desired_visible_order: # Add remaining sheets (like DATA_IMPORT)
                     final_ordered_sheets.append(workbook[title])
             workbook._sheets = final_ordered_sheets
+            print(f"{dt.datetime.now()} - INFO - Sheet order set for user CRM export.")
 
     except Exception as e:
+        print(f"{dt.datetime.now()} - ERROR - Exception during user CRM Excel generation: {e}")
         # Consider logging the error or using st.error if this can be called from Streamlit context directly
-        print(f"Error generating user CRM Excel: {e}") # Basic print for now
+        # print(f"Error generating user CRM Excel: {e}") # Basic print for now
         import traceback
         print(traceback.format_exc())
         return None
 
     output.seek(0)
+    print(f"{dt.datetime.now()} - INFO - User CRM Excel file generation complete. Returning output.")
     return output.getvalue()
 
 def add_entreprise_records(current_df_entreprises: pd.DataFrame, new_records_df: pd.DataFrame, expected_cols: list) -> pd.DataFrame:
@@ -605,6 +670,10 @@ def add_entreprise_records(current_df_entreprises: pd.DataFrame, new_records_df:
     Adds new entreprise records to the current DataFrame of entreprises,
     handles deduplication, and ensures schema.
     """
+    print(f"{dt.datetime.now()} - INFO - add_entreprise_records called.")
+    print(f"{dt.datetime.now()} - INFO - Shape of current_df_entreprises: {current_df_entreprises.shape}")
+    print(f"{dt.datetime.now()} - INFO - Shape of new_records_df: {new_records_df.shape}")
+
     # Ensure current_df_entreprises has the expected schema
     current_df_processed = current_df_entreprises.copy()
     for col in expected_cols:
@@ -620,11 +689,13 @@ def add_entreprise_records(current_df_entreprises: pd.DataFrame, new_records_df:
     new_records_processed = new_records_processed.reindex(columns=expected_cols)
 
     if new_records_processed.empty:
+        print(f"{dt.datetime.now()} - INFO - new_records_df is empty. Returning processed current_df_entreprises.")
         # If there are no new records to add, return the processed current DataFrame
         return current_df_processed
 
     # Concatenate
     combined_df = pd.concat([current_df_processed, new_records_processed], ignore_index=True)
+    print(f"{dt.datetime.now()} - INFO - Shape after concatenation: {combined_df.shape}")
     
     # Drop duplicates, prioritizing the newly added records ('last')
     # Only attempt drop_duplicates if 'SIRET' is present and DataFrame is not empty
@@ -634,11 +705,12 @@ def add_entreprise_records(current_df_entreprises: pd.DataFrame, new_records_df:
         # If SIRET can be legitimately NA and these rows should be kept, this needs adjustment.
         # For now, assuming SIRET is a key that should exist.
         combined_df.drop_duplicates(subset=['SIRET'], keep='last', inplace=True)
+        print(f"{dt.datetime.now()} - INFO - Shape after dropping duplicates on SIRET: {combined_df.shape}")
     
     # Ensure final schema again, mainly for column order and if combined_df became unexpectedly empty
     # or if drop_duplicates removed all rows.
     combined_df = combined_df.reindex(columns=expected_cols)
-    
+    print(f"{dt.datetime.now()} - INFO - add_entreprise_records finished. Final shape: {combined_df.shape}")
     return combined_df
 
 # Add this function to data_utils.py
@@ -650,19 +722,29 @@ def ensure_df_schema(df: pd.DataFrame, expected_cols: list) -> pd.DataFrame:
     Ensures the DataFrame has all expected columns with pd.NA for missing ones,
     and reorders columns to match expected_cols.
     """
+    print(f"{dt.datetime.now()} - INFO - ensure_df_schema called for DataFrame with shape {df.shape}.")
     df_processed = df.copy()
+    added_cols = []
     for col in expected_cols:
         if col not in df_processed.columns:
             df_processed[col] = pd.NA # Use pd.NA for missing values
+            added_cols.append(col)
+    if added_cols:
+        print(f"{dt.datetime.now()} - INFO - ensure_df_schema: Added missing columns: {added_cols}")
+    else:
+        print(f"{dt.datetime.now()} - INFO - ensure_df_schema: No columns were added, all expected columns present.")
     
     # Ensure correct column order and drop any columns not in expected_cols
-    return df_processed.reindex(columns=expected_cols)
+    final_df = df_processed.reindex(columns=expected_cols)
+    print(f"{dt.datetime.now()} - INFO - ensure_df_schema finished. Output DataFrame shape: {final_df.shape}")
+    return final_df
 
 def get_crm_data_for_saving() -> dict:
     """
     Retrieves CRM DataFrames from session state, performs necessary cleaning,
     and returns a dictionary formatted for JSON saving.
     """
+    print(f"{dt.datetime.now()} - INFO - get_crm_data_for_saving called.")
     # Ensure DataFrames exist in session_state and have a default schema if empty
     # This part relies on the main app ensuring df_entreprises, df_contacts, df_actions exist
     # and preferably have their schemas (expected_cols) applied.
@@ -671,6 +753,7 @@ def get_crm_data_for_saving() -> dict:
     df_e = st.session_state.get('df_entreprises', pd.DataFrame())
     df_c = st.session_state.get('df_contacts', pd.DataFrame())
     df_a = st.session_state.get('df_actions', pd.DataFrame())
+    print(f"{dt.datetime.now()} - INFO - Retrieved from session state: {len(df_e)} entreprises, {len(df_c)} contacts, {len(df_a)} actions.")
 
     # Perform data cleaning, especially for JSON serialization compatibility
     # Example: Convert NaT in 'Date Action' to None for df_actions
@@ -679,10 +762,12 @@ def get_crm_data_for_saving() -> dict:
         # Ensure it's datetime first, then convert NaT to None
         df_a_cleaned['Date Action'] = pd.to_datetime(df_a_cleaned['Date Action'], errors='coerce')
         df_a_cleaned['Date Action'] = df_a_cleaned['Date Action'].astype(object).where(df_a_cleaned['Date Action'].notnull(), None)
+        print(f"{dt.datetime.now()} - INFO - Cleaned 'Date Action' column for JSON serialization.")
     
     crm_data = {
         "entreprises": df_e.to_dict(orient='records'),
         "contacts": df_c.to_dict(orient='records'),
         "actions": df_a_cleaned.to_dict(orient='records')
     }
+    print(f"{dt.datetime.now()} - INFO - CRM data converted to dict. Ready for saving.")
     return crm_data
