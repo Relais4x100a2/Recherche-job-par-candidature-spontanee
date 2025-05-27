@@ -120,12 +120,35 @@ effectifs_tranches = {
     "53": "10 000 salariés et plus",
 }
 
+# Mapping des tranches d'effectifs vers une valeur numérique pour le tri
+effectifs_numerical_mapping = {
+    "NN": 0, # Non employeuse
+    "00": 0, # 0 salarié
+    "01": 1, # 1 ou 2 salariés
+    "02": 3, # 3 à 5 salariés
+    "03": 6, # 6 à 9 salariés
+    "11": 10, # 10 à 19 salariés
+    "12": 20, # 20 à 49 salariés
+    "21": 50, # 50 à 99 salariés
+    "22": 100, # 100 à 199 salariés
+    "31": 200, # 200 à 249 salariés
+    "32": 250, # 250 à 499 salariés
+    "41": 500, # 500 à 999 salariés
+    "42": 1000, # 1 000 à 1 999 salariés
+    "51": 2000, # 2 000 à 4 999 salariés
+    "52": 5000, # 5 000 à 9 999 salariés
+    "53": 10000, # 10 000 salariés et plus
+}
+
 naf_sections_details = {
     "A": {"description": "Agriculture, sylviculture et pêche", "icon": "🚜"},
     "B": {"description": "Industries extractives", "icon": "⛏️"},
     "C": {"description": "Industrie manufacturière", "icon": "🏭"},
     "D": {"description": "Electricité, gaz, vapeur et air conditionné ", "icon": "💡"},
-    "E": {"description": "Eau, assainissement, gestion déchets, dépollution", "icon": "💧"},
+    "E": {
+        "description": "Eau, assainissement, gestion déchets, dépollution",
+        "icon": "💧",
+    },
     "F": {"description": "Construction", "icon": "🏗️"},
     "G": {"description": "Commerce ; réparation auto / moto", "icon": "🛒"},
     "H": {"description": "Transports et entreposage", "icon": "🚚"},
@@ -133,14 +156,17 @@ naf_sections_details = {
     "J": {"description": "Information et communication", "icon": "💻"},
     "K": {"description": "Activités financières et d'assurance", "icon": "💰"},
     "L": {"description": "Activités immobilières", "icon": "🏘️"},
-    "M": {"description": "Activités spécialisées, scientifiques et techniques", "icon": "🔬"},
+    "M": {
+        "description": "Activités spécialisées, scientifiques et techniques",
+        "icon": "🔬",
+    },
     "N": {"description": "Services administratifs et de soutien", "icon": "👥"},
-    # "O": {"description": "Administration publique", "icon": "🏛️"}, 
+    # "O": {"description": "Administration publique", "icon": "🏛️"},
     "P": {"description": "Enseignement", "icon": "🎓"},
     "Q": {"description": "Santé humaine et action sociale", "icon": "❤️"},
     "R": {"description": "Arts, spectacles et activités récréatives", "icon": "🎭"},
     "S": {"description": "Autres activités de services", "icon": "🛠️"},
-    # "T": {"description": "Activités des ménages (employeurs ou producteurs de biens et services pour usage propre", "icon": "🏠"}, 
+    # "T": {"description": "Activités des ménages (employeurs ou producteurs de biens et services pour usage propre", "icon": "🏠"},
     # "U": {"description": "Activités extra-territoriales", "icon": "🌍"} #
 }
 
@@ -154,11 +180,27 @@ effectifs_groupes = {
 }
 
 effectifs_groupes_details = {
-    "INDIV": {"label": "0 salarié (entreprise individuelle)", "codes": ["00"], "icon": "👤"},
+    "INDIV": {
+        "label": "0 salarié (entreprise individuelle)",
+        "codes": ["00"],
+        "icon": "👤",
+    },
     "TPE": {"label": "1-9 salariés (TPE)", "codes": ["01", "02", "03"], "icon": "👥"},
-    "PME_S": {"label": "10-49 salariés (PME)", "codes": ["11", "12"], "icon": "👨‍👩‍👧‍👦"},
-    "PME_M": {"label": "50-249 salariés (PME/ETI)", "codes": ["21", "22"], "icon": "🏢"},
-    "GE": {"label": "250+ salariés (Grande Ent.)", "codes": ["31", "32", "41", "42", "51", "52", "53"], "icon": "🏙️"},
+    "PME_S": {
+        "label": "10-49 salariés (PME)",
+        "codes": ["11", "12"],
+        "icon": "👨‍👩‍👧‍👦",
+    },
+    "PME_M": {
+        "label": "50-249 salariés (PME/ETI)",
+        "codes": ["21", "22"],
+        "icon": "🏢",
+    },
+    "GE": {
+        "label": "250+ salariés (Grande Ent.)",
+        "codes": ["31", "32", "41", "42", "51", "52", "53"],
+        "icon": "🏙️",
+    },
     "NN": {"label": "Unités non-employeuses", "codes": ["NN"], "icon": "❓"},
 }
 
@@ -212,8 +254,7 @@ size_mapping = {
 # --- Colonnes pour l'affichage et l'export ---
 COLS_DISPLAY_TABLE = [
     "SIRET",
-    "Nom complet",
-    "Enseignes",
+    "Dénomination - Enseigne",
     "Est siège social",
     "Adresse établissement",
     "Activité NAF/APE Etablissement",
@@ -228,8 +269,7 @@ COLS_DISPLAY_TABLE = [
 
 COLS_EXPORT_ORDER = [
     "SIRET",
-    "Nom complet",
-    "Enseignes",
+    "Dénomination - Enseigne",
     "Activité NAF/APE Etablissement",
     "code_naf_etablissement",
     "Activité NAF/APE Entreprise",
@@ -239,7 +279,7 @@ COLS_EXPORT_ORDER = [
     "Nb salariés établissement",
     "Année nb salariés établissement",
     "Code effectif établissement",
-    "SIREN",
+    "Effectif Numérique", # Added for sorting
     "Raison sociale",
     "Date de création Entreprise",
     "Nb total établissements ouverts",
@@ -307,4 +347,3 @@ VALEURS_LISTE_ENTREPRISE_STATUTPISTE = [
     "Non intéressé",
     "Contrat signé",
 ]
-

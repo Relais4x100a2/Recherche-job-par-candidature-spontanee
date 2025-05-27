@@ -6,7 +6,6 @@ import streamlit as st
 
 import api_client
 import auth_utils
-
 import config
 import data_utils
 import geo_utils
@@ -17,7 +16,8 @@ print(f"{datetime.datetime.now()} - INFO - app.py script started.")
 st.set_page_config(layout="wide")
 
 # --- STYLES CSS PERSONNALISÉS ---
-st.markdown("""
+st.markdown(
+    """
 <style>
     /* Cible les boutons primaires de Streamlit */
     .stButton > button[kind="primary"] {
@@ -36,25 +36,25 @@ st.markdown("""
         background-color: #00ff9d !important; /* Couleur de fond légèrement différente au survol */
     }
 </style>
-""", unsafe_allow_html=True)
+""",
+    unsafe_allow_html=True,
+)
 
 # --- GLOBAL COLUMN DEFINITIONS ---
 # Moved here to be defined before use in session state initialization
 EXPECTED_ENTREPRISE_COLS = [
     "SIRET",
-    "Nom complet",
-    "Enseignes",
-    "Activité NAF/APE établissement",
+    "Dénomination - Enseigne",
+    "Activité NAF/APE Etablissement",
     "Adresse établissement",
+    "Code effectif établissement", # Ajouté pour la conversion fiable
     "Nb salariés établissement",
+    "Effectif Numérique",  # Ajout de la colonne pour le tri/filtre numérique
     "Est siège social",
     "Date de création Entreprise",
     "Chiffre d'Affaires Entreprise",
     "Résultat Net Entreprise",
-    "Année Finances Entreprise",
-    "SIREN",
-    "Notes Personnelles",
-    "Statut Piste",
+    "Année Finances Entreprise"
 ]
 EXPECTED_CONTACT_COLS = [
     "Prénom Nom",
@@ -94,26 +94,36 @@ if "erm_data" not in st.session_state:
 if "df_entreprises" not in st.session_state:
     # Initialiser à partir de erm_data si c'est la première fois
     df_e_initial = pd.DataFrame(st.session_state.erm_data.get("entreprises", []))
-    st.session_state.df_entreprises = data_utils.ensure_df_schema(df_e_initial, EXPECTED_ENTREPRISE_COLS)
+    st.session_state.df_entreprises = data_utils.ensure_df_schema(
+        df_e_initial, EXPECTED_ENTREPRISE_COLS
+    )
     print(
         f"{datetime.datetime.now()} - INFO - Session state 'df_entreprises' initialized from erm_data. Count: {len(st.session_state.df_entreprises)}"
     )
 else:
     # S'assurer que le schéma est correct lors des rechargements suivants (au cas où)
-    st.session_state.df_entreprises = data_utils.ensure_df_schema(st.session_state.df_entreprises, EXPECTED_ENTREPRISE_COLS)
+    st.session_state.df_entreprises = data_utils.ensure_df_schema(
+        st.session_state.df_entreprises, EXPECTED_ENTREPRISE_COLS
+    )
 
 if "df_contacts" not in st.session_state:
     df_c_initial = pd.DataFrame(st.session_state.erm_data.get("contacts", []))
-    st.session_state.df_contacts = data_utils.ensure_df_schema(df_c_initial, EXPECTED_CONTACT_COLS)
+    st.session_state.df_contacts = data_utils.ensure_df_schema(
+        df_c_initial, EXPECTED_CONTACT_COLS
+    )
     print(
         f"{datetime.datetime.now()} - INFO - Session state 'df_contacts' initialized from erm_data. Count: {len(st.session_state.df_contacts)}"
     )
 else:
-    st.session_state.df_contacts = data_utils.ensure_df_schema(st.session_state.df_contacts, EXPECTED_CONTACT_COLS)
+    st.session_state.df_contacts = data_utils.ensure_df_schema(
+        st.session_state.df_contacts, EXPECTED_CONTACT_COLS
+    )
 
 if "df_actions" not in st.session_state:
     df_a_initial = pd.DataFrame(st.session_state.erm_data.get("actions", []))
-    st.session_state.df_actions = data_utils.ensure_df_schema(df_a_initial, EXPECTED_ACTION_COLS)
+    st.session_state.df_actions = data_utils.ensure_df_schema(
+        df_a_initial, EXPECTED_ACTION_COLS
+    )
     if "Date Action" in st.session_state.df_actions.columns:
         st.session_state.df_actions["Date Action"] = pd.to_datetime(
             st.session_state.df_actions["Date Action"], errors="coerce"
@@ -122,8 +132,12 @@ if "df_actions" not in st.session_state:
         f"{datetime.datetime.now()} - INFO - Session state 'df_actions' initialized from erm_data. Count: {len(st.session_state.df_actions)}"
     )
 else:
-    st.session_state.df_actions = data_utils.ensure_df_schema(st.session_state.df_actions, EXPECTED_ACTION_COLS)
-    if "Date Action" in st.session_state.df_actions.columns: # Assurer le type Date également lors des rechargements
+    st.session_state.df_actions = data_utils.ensure_df_schema(
+        st.session_state.df_actions, EXPECTED_ACTION_COLS
+    )
+    if (
+        "Date Action" in st.session_state.df_actions.columns
+    ):  # Assurer le type Date également lors des rechargements
         st.session_state.df_actions["Date Action"] = pd.to_datetime(
             st.session_state.df_actions["Date Action"], errors="coerce"
         )
@@ -159,7 +173,9 @@ if "search_radius" not in st.session_state:
 # et est donc supprimé d'ici.
 
 # --- TITRE ET DESCRIPTION (Toujours visible) ---
-st.title("🔎 Application de recherche d'employeurs potentiels pour candidatures spontanées")
+st.title(
+    "🔎 Application de recherche d'employeurs potentiels pour candidatures spontanées"
+)
 st.markdown(
     "Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés."
 )
@@ -178,13 +194,13 @@ st.header("Paramètres de recherche")
 
 # --- Gestion état session ---
 if "selected_naf_letters" not in st.session_state:
-    st.session_state.selected_naf_letters = ["F","G","J"]
+    st.session_state.selected_naf_letters = ["F", "G", "J"]
 if "selected_effectifs_codes" not in st.session_state:
     st.session_state.selected_effectifs_codes = [
         "01",
         "02",
-        "03", # Virgule ajoutée
-        "11", 
+        "03",  # Virgule ajoutée
+        "11",
         "12",
         "21",
         "22",
@@ -209,7 +225,9 @@ col_gauche, col_droite = st.columns(2)
 with col_gauche:
     st.subheader("📍 Localisation")
     # Créer des sous-colonnes pour réduire la largeur des champs de saisie
-    input_col_loc, _ = st.columns([2, 1]) # Les champs prendront 2/3 de la largeur de col_gauche
+    input_col_loc, _ = st.columns(
+        [2, 1]
+    )  # Les champs prendront 2/3 de la largeur de col_gauche
     with input_col_loc:
         adresse_input = st.text_input(
             "Adresse ou commune de référence",
@@ -225,8 +243,9 @@ with col_gauche:
             step=0.5,
             format="%.1f",
         )
- 
+
     st.subheader("📊 Tranches d'effectifs salariés (Établissement)")
+
     def on_effectif_change(group_key_arg, codes_in_group_arg):
         eff_key = f"eff_group_{group_key_arg}"
         is_selected = st.session_state[eff_key]
@@ -239,11 +258,13 @@ with col_gauche:
             list(current_selection_codes_eff)
         )
         # Pas besoin de rerun ici
+
     cols_eff = st.columns(2)
     col_idx_eff = 0
     for group_key, details in config.effectifs_groupes_details.items():
         is_group_currently_selected = any(
-            code in st.session_state.selected_effectifs_codes for code in details["codes"]
+            code in st.session_state.selected_effectifs_codes
+            for code in details["codes"]
         )
         with cols_eff[col_idx_eff % len(cols_eff)]:
             st.checkbox(
@@ -265,9 +286,10 @@ with col_droite:
     st.caption(
         "Sélectionnez les sections larges. Vous pourrez affiner par codes spécifiques ci-dessous (optionnel)."
     )
+
     def on_section_change():
         current_sections = []
-        for letter in config.naf_sections_details: # Utiliser la nouvelle structure
+        for letter in config.naf_sections_details:  # Utiliser la nouvelle structure
             if st.session_state.get(f"naf_section_{letter}", False):
                 current_sections.append(letter)
         if set(current_sections) != set(st.session_state.selected_naf_letters):
@@ -279,6 +301,7 @@ with col_droite:
                 in st.session_state.selected_naf_letters
             }
             # Pas besoin de rerun ici, Streamlit le fait après le callback
+
     cols_naf = st.columns(2)
     col_idx_naf = 0
     for letter, details in sorted(config.naf_sections_details.items()):
@@ -299,6 +322,7 @@ with col_droite:
                 "Sélectionnez au moins une section NAF ci-dessus pour pouvoir affiner par code."
             )
         else:
+
             def on_specific_naf_change(change_type, section_letter=None, code=None):
                 if change_type == "select_all":
                     select_all_key = f"select_all_{section_letter}"
@@ -322,9 +346,14 @@ with col_droite:
                     else:
                         st.session_state.selected_specific_naf_codes.discard(code)
                 # Pas besoin de rerun ici, Streamlit le fait après le callback
+
             for section_letter in selected_sections_sorted:
                 section_details = config.naf_sections_details.get(section_letter)
-                section_description = section_details['description'] if section_details else section_letter
+                section_description = (
+                    section_details["description"]
+                    if section_details
+                    else section_letter
+                )
                 st.markdown(
                     f"##### Codes spécifiques pour Section {section_description}"
                 )
@@ -369,10 +398,10 @@ with col_droite:
             )
 
         st.caption(
-    f"{len(st.session_state.selected_specific_naf_codes)} code(s) NAF spécifique(s) sélectionné(s) au total."
-)
+            f"{len(st.session_state.selected_specific_naf_codes)} code(s) NAF spécifique(s) sélectionné(s) au total."
+        )
 
-st.markdown("---") # Séparateur pleine largeur
+st.markdown("---")  # Séparateur pleine largeur
 
 # --- ZONE D'AFFICHAGE DES RÉSULTATS ---
 results_container = st.container()
@@ -383,9 +412,7 @@ if lancer_recherche:
 
     # --- Vérifications initiales ---
     if not adresse_input or not adresse_input.strip():
-        st.error(
-            "⚠️ Veuillez saisir une adresse de référence pour lancer la recherche."
-        )
+        st.error("⚠️ Veuillez saisir une adresse de référence pour lancer la recherche.")
         st.stop()
     if not st.session_state.selected_naf_letters:
         st.error("⚠️ Veuillez sélectionner au moins une section NAF.")
@@ -477,22 +504,26 @@ if lancer_recherche:
 
             # Display messages for no results or API errors (these don't need to persist beyond the initial search action)
             if entreprises_trouvees is not None:
-                if len(df_resultats) == 0: # df_resultats is defined from session_state or fresh search
-                    if entreprises_trouvees == []: # API returned empty list for the geo search with NAF
-                         st.info(
+                if (
+                    len(df_resultats) == 0
+                ):  # df_resultats is defined from session_state or fresh search
+                    if (
+                        entreprises_trouvees == []
+                    ):  # API returned empty list for the geo search with NAF
+                        st.info(
                             "Aucune entreprise trouvée correspondant aux critères NAF/APE dans la zone spécifiée."
                         )
-                    else: # API returned results, but filtering by effectifs reduced to zero
+                    else:  # API returned results, but filtering by effectifs reduced to zero
                         st.info(
                             "Des entreprises ont été trouvées dans la zone pour les critères NAF/APE, mais aucun de leurs établissements actifs ne correspond aux tranches d'effectifs sélectionnées."
                         )
-            else: # entreprises_trouvees is None, indicating an API call failure
+            else:  # entreprises_trouvees is None, indicating an API call failure
                 st.error(
                     "La recherche d'entreprises a échoué en raison d'une erreur lors de la communication avec l'API. Vérifiez les messages d'erreur ci-dessus."
                 )
 
         # --- Ajout automatique des nouvelles entreprises à l'ERM en session ---
-        if not df_resultats.empty: # Uniquement si des résultats de recherche existent
+        if not df_resultats.empty:  # Uniquement si des résultats de recherche existent
             # S'assurer que df_entreprises existe et a la colonne SIRET, sinon initialiser comme vide.
             if "SIRET" not in st.session_state.df_entreprises.columns:
                 # This case implies df_entreprises might be empty or from a very old format.
@@ -509,7 +540,9 @@ if lancer_recherche:
                 f"{datetime.datetime.now()} - INFO - Identified {len(df_new_entreprises)} new entreprises not in ERM."
             )
 
-            if not df_new_entreprises.empty: # Si de nouvelles entreprises sont trouvées
+            if (
+                not df_new_entreprises.empty
+            ):  # Si de nouvelles entreprises sont trouvées
                 # Automatic addition of new companies
                 print(
                     f"{datetime.datetime.now()} - INFO - Automatically adding {len(df_new_entreprises)} new entreprises to ERM for user '{st.session_state.username}'."
@@ -517,19 +550,17 @@ if lancer_recherche:
                 # Colonnes attendues dans le ERM (déjà définies dans l'onglet Entreprises)
                 expected_entreprise_cols_for_add = [
                     "SIRET",
-                    "Nom complet",
-                    "Enseignes",
-                    "Activité NAF/APE établissement",
+                    "Dénomination - Enseigne", # Maintenir le nom de la colonne combinée
+                    "Activité NAF/APE Etablissement", # Correction de la casse
                     "Adresse établissement",
+                    "Code effectif établissement", # S'assurer qu'elle est attendue ici aussi
+                    "Effectif Numérique", # S'assurer qu'elle est attendue ici aussi
                     "Nb salariés établissement",
                     "Est siège social",
                     "Date de création Entreprise",
                     "Chiffre d'Affaires Entreprise",
                     "Résultat Net Entreprise",
                     "Année Finances Entreprise",
-                    "SIREN",
-                    "Notes Personnelles",
-                    "Statut Piste",
                 ]
 
                 df_to_add = df_new_entreprises.copy()
@@ -557,9 +588,7 @@ if lancer_recherche:
                 st.session_state.editor_key_version += 1
                 st.rerun()
 
-            elif (
-                not df_resultats.empty
-            ):
+            elif not df_resultats.empty:
                 print(
                     f"{datetime.datetime.now()} - INFO - No new entreprises to add to ERM from search results."
                 )
@@ -624,7 +653,7 @@ with results_container:
                 auto_highlight=True,
             )
             tooltip = {
-                "html": "<b>{Nom complet}</b><br/>SIRET: {SIRET}<br/>Activité Étab.: {Activité NAF/APE Etablissement}<br/>Effectif Étab.: {Nb salariés établissement}",
+                "html": "<b>{Dénomination - Enseigne}</b><br/>SIRET: {SIRET}<br/>Activité Étab.: {Activité NAF/APE Etablissement}<br/>Effectif Étab.: {Nb salariés établissement}",
                 "style": {
                     "backgroundColor": "rgba(0,0,0,0.7)",
                     "color": "white",
@@ -655,7 +684,7 @@ with results_container:
                     "53": "Très Grand",
                 }
                 active_eff_codes = set(
-                    st.session_state.selected_effectifs_codes # This still comes from the sidebar selection for consistency
+                    st.session_state.selected_effectifs_codes  # This still comes from the sidebar selection for consistency
                 )
                 displayed_legend_sizes = set()
                 for (
@@ -664,11 +693,7 @@ with results_container:
                 ) in config.effectifs_groupes.items():
                     if any(code in active_eff_codes for code in group_codes):
                         rep_code = next(
-                            (
-                                c
-                                for c in ["01", "12", "32", "53"]
-                                if c in group_codes
-                            ),
+                            (c for c in ["01", "12", "32", "53"] if c in group_codes),
                             None,
                         )
                         if rep_code and rep_code not in displayed_legend_sizes:
@@ -695,82 +720,161 @@ with results_container:
                         for letter in sections_in_final_results:
                             if letter in config.naf_sections_details:
                                 # Placer chaque élément de la légende dans une colonne
-                                with legend_color_cols[col_idx_legend_color % len(legend_color_cols)]:
-                                    color_rgb = config.naf_color_mapping.get(letter, [128, 128, 128])
+                                with legend_color_cols[
+                                    col_idx_legend_color % len(legend_color_cols)
+                                ]:
+                                    color_rgb = config.naf_color_mapping.get(
+                                        letter, [128, 128, 128]
+                                    )
                                     color_hex = "#%02x%02x%02x" % tuple(color_rgb)
-                                    desc_legende = config.naf_sections_details[letter]['description']
+                                    desc_legende = config.naf_sections_details[letter][
+                                        "description"
+                                    ]
                                     st.markdown(
-                                        f"<span style='color:{color_hex}; font-size: 1.2em; display: inline-block; margin-right: 4px;'>⬤</span>{desc_legende}", # Ajustement taille et espacement
+                                        f"<span style='color:{color_hex}; font-size: 1.2em; display: inline-block; margin-right: 4px;'>⬤</span>{desc_legende}",  # Ajustement taille et espacement
                                         unsafe_allow_html=True,
                                     )
                                 col_idx_legend_color += 1
 
                 else:
-                    st.warning("Colonne 'Section NAF' non trouvée pour la légende des couleurs.")
+                    st.warning(
+                        "Colonne 'Section NAF' non trouvée pour la légende des couleurs."
+                    )
         else:
-            st.info("Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte.")
-        
+            st.info(
+                "Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte."
+            )
+
         # L'utilisateur peut toujours télécharger son ERM complet plus bas.
 
     # Note: The messages for "no results" or "API error" are handled within the `if lancer_recherche:` block
     # as they are direct feedback to the search action and don't necessarily need to persist in the same way
     # the map for successful results does after a rerun triggered by adding to ERM.
 
-print(f"{datetime.datetime.now()} - INFO - Preparing to display ERM tabs for user '{st.session_state.username}'.")
+print(
+    f"{datetime.datetime.now()} - INFO - Preparing to display ERM tabs for user '{st.session_state.username}'."
+)
 if st.session_state.df_entreprises.empty:
     st.info(
         "Aucune entreprise dans votre liste pour le moment. Lancez une recherche pour en ajouter."
     )
-else: # df_entreprises is not empty
+else:  # df_entreprises is not empty
     st.subheader("Tableau des établissements trouvés")
+
+    # Create a copy for display modifications
     df_display_erm = st.session_state.df_entreprises.copy()
+
+    # Ensure 'Effectif Numérique' is correctly populated for display formatting
+    if 'Code effectif établissement' in df_display_erm.columns:
+        df_display_erm['Effectif Numérique'] = df_display_erm['Code effectif établissement'] \
+            .map(config.effectifs_numerical_mapping) \
+            .fillna(0) # Default to 0 if mapping fails or code is NA
+        # Ensure it's integer type
+        df_display_erm['Effectif Numérique'] = pd.to_numeric(df_display_erm['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
+    elif 'Effectif Numérique' not in df_display_erm.columns:
+        # If 'Code effectif établissement' is also missing, and 'Effectif Numérique' is missing, create it with default
+        df_display_erm['Effectif Numérique'] = 0
+    else:
+        # If 'Effectif Numérique' exists but 'Code effectif établissement' does not, ensure it's the correct type and fill NAs
+        df_display_erm['Effectif Numérique'] = pd.to_numeric(df_display_erm['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
+
+
+    # --- MODIFICATION FOR "Nb salariés établissement" DISPLAY ---
+    if 'Effectif Numérique' in df_display_erm.columns and 'Nb salariés établissement' in df_display_erm.columns:
+        def format_effectif_for_display(row):
+            num_val = row.get('Effectif Numérique')
+            text_val = row.get('Nb salariés établissement')
+
+            num_str = ""
+            if pd.notna(num_val):
+                try:
+                    num_str = str(int(num_val)) # Convert to int to remove .0 if float
+                except (ValueError, TypeError):
+                    num_str = str(num_val) 
+            
+            text_upper = str(text_val).upper() if pd.notna(text_val) else "N/A"
+
+            return f"{num_str} - {text_upper}" if num_str else text_upper
+        
+        df_display_erm['Nb salariés établissement'] = df_display_erm.apply(format_effectif_for_display, axis=1)
+    # --- END MODIFICATION ---
+
     # Generate Link Columns
-    if "Nom complet" in df_display_erm.columns:
-        df_display_erm["LinkedIn"] = df_display_erm[
-            "Nom complet"
-        ].apply(
-            lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com"
-            if pd.notna(x) and x.strip() != ""
+    if "Dénomination - Enseigne" in df_display_erm.columns:
+        df_display_erm["LinkedIn"] = df_display_erm["Dénomination - Enseigne"].apply(
+            lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com%2Fcompany%2F"
+            if pd.notna(x) and x.strip() != "" 
             else None
         )
     if (
-        "Nom complet" in df_display_erm.columns
+        "Dénomination - Enseigne" in df_display_erm.columns
         and "Adresse établissement" in df_display_erm.columns
     ):
-        df_display_erm["Google Maps"] = (
-            df_display_erm.apply(
-                lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Nom complet']},{row['Adresse établissement']}"
-                if pd.notna(row["Nom complet"])
-                and row["Nom complet"].strip() != ""
-                and pd.notna(row["Adresse établissement"])
-                and row["Adresse établissement"].strip() != ""
-                else None,
-                axis=1,
-            )
+        df_display_erm["Google Maps"] = df_display_erm.apply(
+            lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
+            if pd.notna(row["Dénomination - Enseigne"])
+            and row["Dénomination - Enseigne"].strip() != ""
+            and pd.notna(row["Adresse établissement"])
+            and row["Adresse établissement"].strip() != ""
+            else None,
+            axis=1,
         )
+        if "Dénomination - Enseigne" in df_display_erm.columns:
+            df_display_erm["Indeed"] = df_display_erm[
+                "Dénomination - Enseigne"
+            ].apply(
+                lambda x: f"https://www.google.com/search?q={x}+site%3Aindeed.com"
+                if pd.notna(x) and x.strip() != ""
+                else None
+            )
     # Définir les colonnes à afficher et leur ordre
-    cols_to_display_erm_tab = EXPECTED_ENTREPRISE_COLS[:] # Copie
-    if "LinkedIn" in df_display_erm.columns:
-        cols_to_display_erm_tab.append("LinkedIn")
-    if "Google Maps" in df_display_erm.columns:
-        cols_to_display_erm_tab.append("Google Maps")
+    # EXPECTED_ENTREPRISE_COLS includes "Effectif Numérique", but we don't want to display it as a separate column.
+    # We construct the display list carefully.
+    display_order_base = [
+        "SIRET", "Dénomination - Enseigne", 
+        # Links will be inserted after Dénomination
+        "Activité NAF/APE Etablissement", "Adresse établissement", 
+        "Nb salariés établissement", # This is the modified one
+        # "Effectif Numérique" n'est plus affiché directement, mais utilisé pour le formatage ci-dessus
+        "Est siège social", "Date de création Entreprise",
+        "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise"
+    ]
+    cols_to_display_erm_tab = display_order_base[:]
     
-    cols_existantes_in_display_tab = [col for col in cols_to_display_erm_tab if col in df_display_erm.columns]
+    # Insert link columns at a specific position
+    link_insert_index = cols_to_display_erm_tab.index("Dénomination - Enseigne") + 1
+    if "Indeed" in df_display_erm.columns and "Indeed" not in cols_to_display_erm_tab:
+        cols_to_display_erm_tab.insert(link_insert_index, "Indeed")
+    if "Google Maps" in df_display_erm.columns and "Google Maps" not in cols_to_display_erm_tab:
+        cols_to_display_erm_tab.insert(link_insert_index, "Google Maps")
+    if "LinkedIn" in df_display_erm.columns and "LinkedIn" not in cols_to_display_erm_tab:
+        cols_to_display_erm_tab.insert(link_insert_index, "LinkedIn")
+
+    cols_existantes_in_display_tab = [
+        col for col in cols_to_display_erm_tab if col in df_display_erm.columns
+    ]
+
+    # Define column configurations, excluding "Effectif Numérique"
+    column_config_map = {
+        "LinkedIn": st.column_config.LinkColumn("LinkedIn", display_text="🔗 LinkedIn"),
+        "Google Maps": st.column_config.LinkColumn("Google Maps", display_text="📍 Google Maps"),
+        "Indeed": st.column_config.LinkColumn("Indeed", display_text="🔗 Indeed"),
+        "Est siège social": st.column_config.CheckboxColumn(disabled=True),
+        "Date de création Entreprise": st.column_config.DateColumn(format="DD/MM/YYYY", disabled=True),
+        "Chiffre d'Affaires Entreprise": st.column_config.NumberColumn(label="CA Ent.", format="%d €", disabled=True),
+        "Nb salariés établissement": st.column_config.TextColumn(label="Nb salariés établissement"), # Displays the new combined string
+        "Résultat Net Entreprise": st.column_config.NumberColumn(label="Rés. Net Ent.", format="%d €", disabled=True),
+    }
+
     st.dataframe(
         df_display_erm[cols_existantes_in_display_tab],
-        column_config={
-            "LinkedIn": st.column_config.LinkColumn("LinkedIn", display_text="🔗 Profil"),
-            "Google Maps": st.column_config.LinkColumn("Google Maps", display_text="📍 Maps"),
-            "Est siège social": st.column_config.CheckboxColumn(disabled=True),
-            "Date de création Entreprise": st.column_config.DateColumn(format="DD/MM/YYYY", disabled=True),
-            "Chiffre d'Affaires Entreprise": st.column_config.NumberColumn(label="CA Ent.", format="€ %d", disabled=True),
-            "Résultat Net Entreprise": st.column_config.NumberColumn(label="Rés. Net Ent.", format="€ %d", disabled=True),
-        },
+        column_config=column_config_map,
         hide_index=True,
-        use_container_width=True
+        use_container_width=True,
     )
 
 print(f"{datetime.datetime.now()} - INFO - TAB ENTREPRISES: Before final ensure_df_schema. Shape: {st.session_state.df_entreprises.shape}")
+
 # Ensure final schema using the utility function
 st.session_state.df_entreprises = data_utils.ensure_df_schema(
     st.session_state.df_entreprises, EXPECTED_ENTREPRISE_COLS
@@ -797,5 +901,5 @@ try:
     )
 except Exception as e:
     st.error(f"Erreur lors de la préparation du téléchargement ERM : {e}")
-st.markdown("---") 
+st.markdown("---")
 st.info("API: recherche-entreprises.api.gouv.fr & BAN France")

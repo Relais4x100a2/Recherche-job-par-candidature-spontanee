@@ -7,7 +7,6 @@ import pandas as pd
 import streamlit as st
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
-
 from openpyxl.worksheet.datavalidation import DataValidation
 
 import config
@@ -167,8 +166,8 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
     num_etablissements_matched = 0
     for entreprise in entreprises:
         siren = entreprise.get("siren")
-        nom_complet = entreprise.get("nom_complet")
-        nom_sociale = entreprise.get("nom_raison_sociale")
+        # nom_complet_api = entreprise.get("nom_complet") # Company's legal name
+        # nom_sociale_api = entreprise.get("nom_raison_sociale") # Often similar or more formal
         date_creation = entreprise.get("date_creation")
         nombre_etablissements_ouverts = entreprise.get("nombre_etablissements_ouverts")
         code_naf_entreprise = entreprise.get("activite_principale")
@@ -207,6 +206,47 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
             )
             if etat_etab == "A" and tranche_eff_etab in selected_effectifs_codes_set:
                 num_etablissements_matched += 1
+
+                # --- Début de la logique de combinaison Dénomination - Enseigne + Enseigne ---
+                base_name_for_etab = str(entreprise.get("nom_complet", "")).strip()
+                if not base_name_for_etab:  # Fallback si nom_complet est vide
+                    base_name_for_etab = str(
+                        entreprise.get("nom_raison_sociale", "")
+                    ).strip()
+
+                liste_enseignes_etab = etab.get("liste_enseignes", [])
+                enseignes_str_etab = ""
+                if liste_enseignes_etab:
+                    # Filtre les enseignes valides et les joint
+                    valid_enseignes = [
+                        str(e).strip()
+                        for e in liste_enseignes_etab
+                        if e and str(e).strip()
+                    ]
+                    if valid_enseignes:
+                        enseignes_str_etab = ", ".join(valid_enseignes)
+
+                processed_name = base_name_for_etab
+
+                if enseignes_str_etab and enseignes_str_etab.upper() != "N/A":
+                    processed_name_upper = processed_name.upper()
+                    enseignes_str_etab_upper = enseignes_str_etab.upper()
+
+                    if (
+                        not processed_name
+                    ):  # Si le nom de base est vide, l'enseigne devient le nom
+                        processed_name = enseignes_str_etab
+                    # Ajoute l'enseigne si elle est différente ET n'est pas déjà une sous-chaîne
+                    elif (
+                        enseignes_str_etab_upper != processed_name_upper
+                        and enseignes_str_etab_upper not in processed_name_upper
+                    ):
+                        processed_name = f"{processed_name} - {enseignes_str_etab}"
+
+                if not processed_name:  # S'assurer qu'il y a une valeur
+                    processed_name = "N/A"
+                # --- Fin de la logique de combinaison ---
+
                 all_etablissements_data.append(
                     {
                         "SIRET": etab.get("siret"),
@@ -219,10 +259,11 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
                         "adresse": etab.get("adresse"),
                         "latitude": etab.get("latitude"),
                         "longitude": etab.get("longitude"),
-                        "liste_enseignes": etab.get("liste_enseignes", []),
                         "est_siege": etab.get("est_siege", False),
-                        "nom_complet_entreprise": nom_complet,
-                        "nom_sociale_entreprise": nom_sociale,
+                        "nom_complet_entreprise": processed_name,  # Utilise le nom traité
+                        "nom_sociale_entreprise": entreprise.get(
+                            "nom_raison_sociale"
+                        ),  # Garde la raison sociale brute
                         "date_creation_entreprise": date_creation,
                         "nb_etab_ouverts_entreprise": nombre_etablissements_ouverts,
                         "code_naf_entreprise": code_naf_entreprise,
@@ -273,12 +314,9 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
     df_filtered["Résultat Net Entreprise"] = pd.to_numeric(
         df_filtered["resultat_net_entreprise"], errors="coerce"
     )
-    df_filtered["Enseignes"] = df_filtered["liste_enseignes"].apply(
-        lambda x: ", ".join(x) if isinstance(x, list) and x else "N/A"
-    )
     final_df = df_filtered.rename(
         columns={
-            "nom_complet_entreprise": "Nom complet",
+            "nom_complet_entreprise": "Dénomination - Enseigne",
             "est_siege": "Est siège social",
             "adresse": "Adresse établissement",
             "tranche_effectif_salarie_etablissement": "Code effectif établissement",
@@ -326,8 +364,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
             print(f"{dt.datetime.now()} - INFO - Creating DATA_IMPORT sheet.")
             data_import_cols = [
                 "SIRET",
-                "Nom complet",
-                "Enseignes",
+                "Dénomination - Enseigne",
                 "Activité NAF/APE Etablissement",
                 "code_naf_etablissement",
                 "Activité NAF/APE Entreprise",
@@ -363,12 +400,12 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
             )
             entreprises_headers = [
                 "SIRET",
-                "Nom complet",
-                "Enseignes",
-                "Activité NAF/APE établissement",
-                "Adresse établissement",
+                "Dénomination - Enseigne",
                 "Recherche LinkedIn",
                 "Recherche Google Maps",
+                "Recherche Indeed",
+                "Activité NAF/APE Etablissement",
+                "Adresse établissement",
                 "Nb salariés établissement",
                 "Est siège social",
                 "Date de création Entreprise",
@@ -388,59 +425,69 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
 
             # Write formulas row by row
             # Column mapping for ENTREPRISES sheet (1-indexed for openpyxl)
-            # B: Nom complet, E: Adresse établissement
+            # B: Dénomination - Enseigne, E: Adresse établissement
             for r_idx in range(num_data_rows):
                 excel_row = r_idx + 2  # Excel rows are 1-indexed, data starts on row 2
+                # Col 1: SIRET
                 ws_entreprises.cell(
                     row=excel_row, column=1, value=f"=DATA_IMPORT!A{excel_row}"
-                )  # SIRET
+                )
+                # Col 2: Dénomination - Enseigne
                 ws_entreprises.cell(
                     row=excel_row, column=2, value=f"=DATA_IMPORT!B{excel_row}"
-                )  # Nom complet
+                )
+                # Col 3: Activité NAF/APE Etablissement
                 ws_entreprises.cell(
                     row=excel_row, column=3, value=f"=DATA_IMPORT!C{excel_row}"
-                )  # Enseignes
-                ws_entreprises.cell(
-                    row=excel_row, column=4, value=f"=DATA_IMPORT!D{excel_row}"
-                )  # Activité NAF/APE établissement
-                ws_entreprises.cell(
-                    row=excel_row, column=5, value=f"=DATA_IMPORT!H{excel_row}"
-                )  # Adresse établissement
-                # Recherche LinkedIn: HYPERLINK("google search for B{excel_row} + linkedin", "Recherche LinkedIn " & B{excel_row})
-                # B{excel_row} in ENTREPRISES sheet is Nom complet
+                )
+                # Col 4: Recherche LinkedIn (B{excel_row} is Dénomination)
                 ws_entreprises.cell(
                     row=excel_row,
-                    column=6,
-                    value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Alinkedin.com","Recherche LinkedIn "&B{excel_row}&"")',
+                    column=4,
+                    value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Ahttps%3A%2F%2Fwww.linkedin.com%2Fcompany%2F","Recherche LinkedIn "&B{excel_row}&"")',
                 )
-                # Recherche Google Maps: HYPERLINK("google maps search for B{excel_row} , E{excel_row}", "Recherche Google Maps " & B{excel_row})
-                # B{excel_row} is Nom complet, E{excel_row} is Adresse établissement in ENTREPRISES sheet
+                # Col 5: Recherche Google Maps (B{excel_row} is Dénomination, G{excel_row} will be Adresse Etablissement)
+                ws_entreprises.cell(
+                    row=excel_row,
+                    column=5,
+                    value=f'=HYPERLINK("https://www.google.com/maps/search/?api=1&query="&B{excel_row}&","&G{excel_row}&"","Recherche Google Maps "&B{excel_row}&"")',
+                )
+                # Col 6: Recherche Indeed (B{excel_row} is Dénomination)
                 ws_entreprises.cell(
                     row=excel_row,
                     column=7,
-                    value=f'=HYPERLINK("https://www.google.com/maps/search/?api=1&query="&B{excel_row}&","&E{excel_row}&"","Recherche Google Maps "&B{excel_row}&"")',
+                    value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Aindeed.com","Recherche Indeed "&B{excel_row}&"")',
                 )
+                # Col 7: Adresse établissement
                 ws_entreprises.cell(
-                    row=excel_row, column=8, value=f"=DATA_IMPORT!I{excel_row}"
-                )  # Nb salariés établissement
+                    row=excel_row,
+                    column=7, # Nouvelle position pour Adresse
+                    value=f"=DATA_IMPORT!G{excel_row}", # DATA_IMPORT col G is Adresse
+                )
+                # Col 8: Nb salariés établissement
                 ws_entreprises.cell(
-                    row=excel_row, column=9, value=f"=DATA_IMPORT!J{excel_row}"
-                )  # Est siège social
+                    row=excel_row, column=8, value=f"=DATA_IMPORT!H{excel_row}"
+                )
+                # Les colonnes suivantes gardent leurs sources DATA_IMPORT mais leurs indices de colonnes dans ENTREPRISES sont décalés
+                # Col 9: Est siège social
                 ws_entreprises.cell(
-                    row=excel_row, column=10, value=f"=DATA_IMPORT!K{excel_row}"
-                )  # Date de création Entreprise
+                    row=excel_row, column=9, value=f"=DATA_IMPORT!I{excel_row}" # Est siège (était J, devient I)
+                )  # Est siège social (était J)
                 ws_entreprises.cell(
-                    row=excel_row, column=11, value=f"=DATA_IMPORT!L{excel_row}"
-                )  # Chiffre d'Affaires Entreprise
+                    row=excel_row, column=10, value=f"=DATA_IMPORT!J{excel_row}" # Date création (était K, devient J)
+                )  # Date de création Entreprise (était K)
                 ws_entreprises.cell(
-                    row=excel_row, column=12, value=f"=DATA_IMPORT!M{excel_row}"
-                )  # Résultat Net Entreprise
+                    row=excel_row, column=11, value=f"=DATA_IMPORT!K{excel_row}" # CA (était L, devient K)
+                )  # Chiffre d'Affaires Entreprise (était L)
                 ws_entreprises.cell(
-                    row=excel_row, column=13, value=f"=DATA_IMPORT!N{excel_row}"
-                )  # Année Finances Entreprise
+                    row=excel_row, column=12, value=f"=DATA_IMPORT!L{excel_row}" # Résultat Net (était M, devient L)
+                )  # Résultat Net Entreprise (était M)
                 ws_entreprises.cell(
-                    row=excel_row, column=14, value=f"=DATA_IMPORT!O{excel_row}"
-                )  # SIREN
+                    row=excel_row, column=13, value=f"=DATA_IMPORT!M{excel_row}" # Année Finances (était N, devient M)
+                )  # Année Finances Entreprise (était N)
+                ws_entreprises.cell(
+                    row=excel_row, column=14, value=f"=DATA_IMPORT!N{excel_row}" # SIREN (était O, devient N)
+                )  # SIREN (était O)
 
             # 3. VALEURS_LISTE Sheet
             vl_headers = [
@@ -511,7 +558,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 formula1=f"=ENTREPRISES!$B$2:$B${max_row_validation}",
                 allow_blank=True,
             )
-            dv_contacts_entreprise.error = "Veuillez choisir une entreprise de la liste (Feuille ENTREPRISES, colonne 'Nom complet')."
+            dv_contacts_entreprise.error = "Veuillez choisir une entreprise de la liste (Feuille ENTREPRISES, colonne 'Dénomination - Enseigne')."
             dv_contacts_entreprise.errorTitle = "Entreprise Invalide"
             ws_contacts.add_data_validation(dv_contacts_entreprise)
             dv_contacts_entreprise.add(f"B2:B{max_row_validation}")
@@ -533,7 +580,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 formula1=f"=ENTREPRISES!$B$2:$B${max_row_validation}",
                 allow_blank=True,
             )
-            dv_actions_entreprise.error = "Veuillez choisir une entreprise de la liste (Feuille ENTREPRISES, colonne 'Nom complet')."
+            dv_actions_entreprise.error = "Veuillez choisir une entreprise de la liste (Feuille ENTREPRISES, colonne 'Dénomination - Enseigne')."
             dv_actions_entreprise.errorTitle = "Entreprise Invalide"
             ws_actions.add_data_validation(dv_actions_entreprise)
             dv_actions_entreprise.add(f"A2:A{max_row_validation}")
@@ -607,7 +654,9 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                             max_length = max(max_length, 30)
                         else:
                             for i in range(min(5, num_data_rows)):
-                                cell_value_formula = sheet.cell(row=i + 2, column=col_idx + 1).value
+                                cell_value_formula = sheet.cell(
+                                    row=i + 2, column=col_idx + 1
+                                ).value
                                 if cell_value_formula:
                                     pass
 
@@ -615,9 +664,11 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                     adjusted_width = min(adjusted_width, 60)
                     sheet.column_dimensions[column_letter].width = adjusted_width
 
-            # 8. Styling Headers
+            # 8. Styling Headers & Hyperlink styling for specific columns
             header_font = Font(bold=True, color="FFFFFFFF")
-            header_fill = PatternFill(start_color="FF4472C4", end_color="FF4472C4", fill_type="solid")
+            header_fill = PatternFill(
+                start_color="FF4472C4", end_color="FF4472C4", fill_type="solid"
+            )
             header_alignment = Alignment(horizontal="center", vertical="center")
 
             sheets_to_style_headers = [
@@ -633,6 +684,19 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                         cell.font = header_font
                         cell.fill = header_fill
                         cell.alignment = header_alignment
+            
+            # Specific styling for hyperlink columns in ENTREPRISES
+            ws_entreprises_style = workbook["ENTREPRISES"]
+            link_font = Font(color="0563C1", underline="single")
+            # Colonnes E, F, G (Recherche LinkedIn, Google Maps, Indeed)
+            # Nouveaux indices de colonnes pour openpyxl (1-basés):
+            # LinkedIn = 4, Google Maps = 5, Indeed = 6
+            link_columns_indices = [4, 5, 6]
+            for col_idx in link_columns_indices:
+                for row_idx in range(2, num_data_rows + 2): # Data rows + header
+                    cell = ws_entreprises_style.cell(row=row_idx, column=col_idx)
+                    if row_idx > 1: # Skip header
+                        cell.font = link_font
 
             # 9. Hide DATA_IMPORT sheet
             if "DATA_IMPORT" in workbook.sheetnames:
@@ -716,8 +780,7 @@ def generate_user_erm_excel(
             # it matches the structure expected if it were raw data.
             data_import_cols = [
                 "SIRET",
-                "Nom complet",
-                "Enseignes",
+                "Dénomination - Enseigne",
                 "Activité NAF/APE Etablissement",
                 "Adresse établissement",
                 "Nb salariés établissement",
@@ -748,11 +811,11 @@ def generate_user_erm_excel(
             df_entreprises_sheet = df_entreprises.copy()
 
             # Generate hyperlink columns if base columns exist
-            if "Nom complet" in df_entreprises_sheet.columns:
+            if "Dénomination - Enseigne" in df_entreprises_sheet.columns:
                 df_entreprises_sheet["Recherche LinkedIn"] = df_entreprises_sheet[
-                    "Nom complet"
+                    "Dénomination - Enseigne"
                 ].apply(
-                    lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com"
+                    lambda x: f"https://www.google.com/search?q={x}+site%3Ahttps%3A%2F%2Fwww.linkedin.com%2Fcompany%2F"
                     if pd.notna(x) and x.strip() != ""
                     else None
                 )
@@ -760,14 +823,14 @@ def generate_user_erm_excel(
                 df_entreprises_sheet["Recherche LinkedIn"] = None
 
             if (
-                "Nom complet" in df_entreprises_sheet.columns
+                "Dénomination - Enseigne" in df_entreprises_sheet.columns
                 and "Adresse établissement" in df_entreprises_sheet.columns
             ):
                 df_entreprises_sheet["Recherche Google Maps"] = (
                     df_entreprises_sheet.apply(
-                        lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Nom complet']},{row['Adresse établissement']}"
-                        if pd.notna(row["Nom complet"])
-                        and row["Nom complet"].strip() != ""
+                        lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
+                        if pd.notna(row["Dénomination - Enseigne"])
+                        and row["Dénomination - Enseigne"].strip() != ""
                         and pd.notna(row["Adresse établissement"])
                         and row["Adresse établissement"].strip() != ""
                         else None,
@@ -777,15 +840,25 @@ def generate_user_erm_excel(
             else:
                 df_entreprises_sheet["Recherche Google Maps"] = None
 
+            if "Dénomination - Enseigne" in df_entreprises_sheet.columns:
+                df_entreprises_sheet["Recherche Indeed"] = df_entreprises_sheet[
+                    "Dénomination - Enseigne"
+                ].apply(
+                    lambda x: f"https://www.google.com/search?q={x}+site%3Aindeed.com"
+                    if pd.notna(x) and x.strip() != ""
+                    else None
+                )
+            else:
+                df_entreprises_sheet["Recherche Indeed"] = None
             # Define desired column order for the sheet
             entreprises_sheet_cols_ordered = [
                 "SIRET",
-                "Nom complet",
-                "Enseignes",
-                "Activité NAF/APE établissement",
-                "Adresse établissement",
+                "Dénomination - Enseigne",
                 "Recherche LinkedIn",
                 "Recherche Google Maps",
+                "Recherche Indeed",
+                "Activité NAF/APE Etablissement",
+                "Adresse établissement",
                 "Nb salariés établissement",
                 "Est siège social",
                 "Date de création Entreprise",
@@ -886,7 +959,7 @@ def generate_user_erm_excel(
 
             # CONTACTS Sheet Validations
             ws_contacts = workbook["CONTACTS"]
-            # Entreprise validation (from ENTREPRISES sheet, 'Nom complet' column - B)
+            # Entreprise validation (from ENTREPRISES sheet, 'Dénomination - Enseigne' column - B)
             dv_contacts_entreprise = DataValidation(
                 type="list",
                 formula1=f"=ENTREPRISES!$B$2:$B${max_row_validation}",
@@ -980,7 +1053,7 @@ def generate_user_erm_excel(
                     adjusted_width = min(adjusted_width, 60)  # Cap max width
                     sheet.column_dimensions[column_letter].width = adjusted_width
 
-            # 8. Styling Headers
+            # 8. Styling Headers & Hyperlinks
             header_font = Font(bold=True, color="FFFFFFFF")
             header_fill = PatternFill(
                 start_color="FF4472C4", end_color="FF4472C4", fill_type="solid"
@@ -1000,6 +1073,20 @@ def generate_user_erm_excel(
                         cell.font = header_font
                         cell.fill = header_fill
                         cell.alignment = header_alignment
+            
+            # Specific styling for hyperlink columns in ENTREPRISES
+            ws_entreprises_user_style = workbook["ENTREPRISES"]
+            link_font_user = Font(color="0563C1", underline="single")
+            # Assuming 'Recherche LinkedIn', 'Recherche Google Maps', 'Recherche Indeed' are present
+            # Find their column indices based on entreprises_sheet_cols_ordered
+            link_col_names = ["Recherche LinkedIn", "Recherche Google Maps", "Recherche Indeed"]
+            for col_name in link_col_names:
+                if col_name in df_entreprises_sheet.columns:
+                    col_idx_excel = df_entreprises_sheet.columns.get_loc(col_name) + 1 # 1-based for openpyxl
+                    for row_idx_user in range(2, len(df_entreprises_sheet) + 2): # Data rows + header
+                        cell_user = ws_entreprises_user_style.cell(row=row_idx_user, column=col_idx_excel)
+                        if row_idx_user > 1: # Skip header
+                            cell_user.font = link_font_user
 
             # 9. Hide DATA_IMPORT sheet
             if "DATA_IMPORT" in workbook.sheetnames:
@@ -1018,9 +1105,7 @@ def generate_user_erm_excel(
                 if title in current_sheet_titles:
                     final_ordered_sheets.append(workbook[title])
             for title in current_sheet_titles:
-                if (
-                    title not in desired_visible_order
-                ):
+                if title not in desired_visible_order:
                     final_ordered_sheets.append(workbook[title])
             workbook._sheets = final_ordered_sheets
             print(f"{dt.datetime.now()} - INFO - Sheet order set for user ERM export.")
