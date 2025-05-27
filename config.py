@@ -140,6 +140,26 @@ effectifs_numerical_mapping = {
     "53": 10000, # 10 000 salariés et plus
 }
 
+# Mapping des valeurs numériques d'effectifs vers un préfixe alphabétique pour l'affichage
+effectif_numeric_to_letter_prefix = {
+    # La valeur 0 (pour "NN" et "00") n'est pas incluse ici, 
+    # donc ces tranches n'auront pas de préfixe alphabétique par défaut.
+    1: "a",    # Corresponds à "01" (1 ou 2 salariés)
+    3: "b",    # Corresponds à "02" (3 à 5 salariés)
+    6: "c",    # Corresponds à "03" (6 à 9 salariés)
+    10: "d",   # Corresponds à "11" (10 à 19 salariés)
+    20: "e",   # Corresponds à "12" (20 à 49 salariés)
+    50: "f",   # Corresponds à "21" (50 à 99 salariés)
+    100: "g",  # Corresponds à "22" (100 à 199 salariés)
+    200: "h",  # Corresponds à "31" (200 à 249 salariés)
+    250: "i",  # Corresponds à "32" (250 à 499 salariés)
+    500: "j",  # Corresponds à "41" (500 à 999 salariés)
+    1000: "k", # Corresponds à "42" (1 000 à 1 999 salariés)
+    2000: "l", # Corresponds à "51" (2 000 à 4 999 salariés)
+    5000: "m", # Corresponds à "52" (5 000 à 9 999 salariés)
+    10000: "n" # Corresponds à "53" (10 000 salariés et plus)
+}
+
 naf_sections_details = {
     "A": {"description": "Agriculture, sylviculture et pêche", "icon": "🚜"},
     "B": {"description": "Industries extractives", "icon": "⛏️"},

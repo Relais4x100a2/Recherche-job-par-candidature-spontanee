@@ -197,9 +197,6 @@ if "selected_naf_letters" not in st.session_state:
     st.session_state.selected_naf_letters = ["F", "G", "J"]
 if "selected_effectifs_codes" not in st.session_state:
     st.session_state.selected_effectifs_codes = [
-        "01",
-        "02",
-        "03",  # Virgule ajoutée
         "11",
         "12",
         "21",
@@ -280,6 +277,12 @@ with col_gauche:
     st.write("")
     st.write("")
     lancer_recherche = st.button("🚀 Rechercher les entreprises", type="primary")
+    
+    # Explanation about adding results
+    st.info(
+        "Note : Les résultats d'une nouvelle recherche sont **ajoutés** au tableau ci-dessous. "
+        "Utilisez le bouton 'Effacer le tableau des établissements' pour repartir d'une liste vide."
+    )
 
 with col_droite:
     st.subheader("📂 Secteurs d'activité NAF")
@@ -598,6 +601,7 @@ if lancer_recherche:
 
     # --- SECTION ERM ---
 
+
 # --- AFFICHAGE PERSISTANT DES RÉSULTATS DE RECHERCHE (SI EXISTANTS) ---
 with results_container:
     if (
@@ -674,7 +678,7 @@ with results_container:
             st.subheader("Légende")
             cols_legende = st.columns([1, 2])
             with cols_legende[0]:
-                st.markdown("**Taille ≈ Effectif Étab.**")
+                st.markdown("**Taille ≈ Effectif établissement**")
                 legend_pixel_sizes = {"01": 8, "12": 12, "32": 18, "53": 24}
                 base_circle_style = "display: inline-block; border-radius: 50%; background-color: #808080; margin-right: 5px; vertical-align: middle;"
                 legend_sizes = {
@@ -706,7 +710,7 @@ with results_container:
                                 unsafe_allow_html=True,
                             )
             with cols_legende[1]:
-                st.markdown("**Couleur = Section NAF**")
+                st.markdown("**Couleur = Secteur d'activité**")
                 if "Section NAF" in df_map_display.columns:
                     sections_in_final_results = sorted(
                         list(set(df_map_display["Section NAF"].unique()) - {"N/A"})
@@ -758,6 +762,7 @@ if st.session_state.df_entreprises.empty:
     st.info(
         "Aucune entreprise dans votre liste pour le moment. Lancez une recherche pour en ajouter."
     )
+        # The clear button is hidden if the table is already empty
 else:  # df_entreprises is not empty
     st.subheader("Tableau des établissements trouvés")
 
@@ -782,19 +787,21 @@ else:  # df_entreprises is not empty
     # --- MODIFICATION FOR "Nb salariés établissement" DISPLAY ---
     if 'Effectif Numérique' in df_display_erm.columns and 'Nb salariés établissement' in df_display_erm.columns:
         def format_effectif_for_display(row):
-            num_val = row.get('Effectif Numérique')
-            text_val = row.get('Nb salariés établissement')
+            num_val = row.get('Effectif Numérique') # Ex: 0, 1, 3, 10...
+            text_val = row.get('Nb salariés établissement') # Ex: "1 ou 2 salariés"
 
-            num_str = ""
+            letter_prefix = ""
             if pd.notna(num_val):
                 try:
-                    num_str = str(int(num_val)) # Convert to int to remove .0 if float
+                    # Assurer que num_val est un entier pour la clé du dictionnaire
+                    num_val_int = int(num_val) 
+                    letter_prefix = config.effectif_numeric_to_letter_prefix.get(num_val_int, "")
                 except (ValueError, TypeError):
-                    num_str = str(num_val) 
+                    pass # Si num_val n'est pas convertible en int, letter_prefix reste ""
             
             text_upper = str(text_val).upper() if pd.notna(text_val) else "N/A"
 
-            return f"{num_str} - {text_upper}" if num_str else text_upper
+            return f"{letter_prefix} - {text_upper}" if letter_prefix else text_upper
         
         df_display_erm['Nb salariés établissement'] = df_display_erm.apply(format_effectif_for_display, axis=1)
     # --- END MODIFICATION ---
@@ -902,4 +909,16 @@ try:
 except Exception as e:
     st.error(f"Erreur lors de la préparation du téléchargement ERM : {e}")
 st.markdown("---")
-st.info("API: recherche-entreprises.api.gouv.fr & BAN France")
+st.markdown(" Propulsé avec les API Data Gouv : [API Recherche d’Entreprises](https://www.data.gouv.fr/fr/dataservices/api-recherche-dentreprises/) & [API BAN France](https://www.data.gouv.fr/fr/dataservices/api-adresse-base-adresse-nationale-ban/)")
+st.markdown("---")
+# --- Bouton pour effacer le tableau des établissements ---
+if not st.session_state.df_entreprises.empty:
+    with st.expander("Zone de danger", expanded=True):
+        st.warning("Attention : Cette action effacera **toutes** les entreprises actuellement affichées dans le tableau.")
+        if st.button("🗑️ Effacer le tableau des établissements", key="clear_table_button_in_danger_zone"): # Ajout d'une clé unique
+            st.session_state.df_entreprises = data_utils.ensure_df_schema(
+                pd.DataFrame(), EXPECTED_ENTREPRISE_COLS
+            )
+            st.session_state.editor_key_version += 1 # Increment key to force editor refresh if it were used
+            st.session_state.df_search_results = None # Clear search results display as well
+            st.rerun() # Rerun to update the display immediately
