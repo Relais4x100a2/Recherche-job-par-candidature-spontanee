@@ -180,16 +180,6 @@ st.markdown(
     "Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés."
 )
 
-
-# --- CONTENU PRINCIPAL DE L'APPLICATION  ---
-
-# --- Vérification chargement NAF ---
-if data_utils.naf_detailed_lookup is None:
-    st.error(
-        "Erreur critique : Le dictionnaire NAF n'a pas pu être chargé. L'application ne peut pas continuer."
-    )
-    st.stop()
-
 st.header("Paramètres de recherche")
 
 # --- Gestion état session ---
@@ -216,6 +206,21 @@ else:
         st.session_state.selected_specific_naf_codes = set(
             st.session_state.selected_specific_naf_codes
         )
+
+# --- CONTENU PRINCIPAL DE L'APPLICATION  ---
+
+# --- Initialize and Verify NAF data loading (after st.set_page_config) ---
+# This call will trigger load_naf_dictionary (and its caching) 
+# and populate data_utils.naf_detailed_lookup
+data_utils.get_naf_lookup()
+
+if data_utils.naf_detailed_lookup is None: # Check if loading was successful
+    st.error(
+        "Erreur critique : Le dictionnaire NAF n'a pas pu être chargé. "
+        "Vérifiez les logs de la console pour plus de détails (ex: fichier NAF.csv manquant ou corrompu). "
+        "L'application ne peut pas continuer."
+    )
+    st.stop()
 
 col_gauche, col_droite = st.columns(2)
 

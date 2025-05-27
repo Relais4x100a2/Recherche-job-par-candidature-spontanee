@@ -55,32 +55,22 @@ def load_naf_dictionary(file_path=config.NAF_FILE_PATH):
             print(
                 f"{dt.datetime.now()} - ERROR - NAF file not found at path: {file_path}"
             )
-            st.error(
-                f"Erreur critique : Le fichier NAF '{file_path}' est introuvable. Vérifiez le chemin."
-            )
             return None
         except pd.errors.EmptyDataError:
             print(
                 f"{dt.datetime.now()} - ERROR - NAF file is empty at path: {file_path}"
             )
-            st.error(f"Erreur critique : Le fichier NAF '{file_path}' est vide.")
             return None
 
     if df_naf is None:
         print(
             f"{dt.datetime.now()} - ERROR - Could not find 'Code' and 'Libellé' columns in {file_path} with any attempted separator/encoding."
         )
-        st.error(
-            f"Colonnes 'Code' et 'Libellé' introuvables dans {file_path} avec les séparateurs et encodages testés."
-        )
         return None
 
     if df_naf.empty:
         print(
             f"{dt.datetime.now()} - WARNING - NAF file '{file_path}' is empty or could not be read correctly."
-        )
-        st.error(
-            f"Le fichier NAF '{file_path}' est vide ou n'a pas pu être lu correctement."
         )
         return None
 
@@ -98,13 +88,25 @@ def load_naf_dictionary(file_path=config.NAF_FILE_PATH):
         print(
             f"{dt.datetime.now()} - ERROR - Critical error during NAF file processing from '{file_path}': {e}"
         )
-        st.error(
-            f"Erreur critique lors du chargement du fichier NAF '{file_path}': {e}"
-        )
         return None
 
 
-naf_detailed_lookup = load_naf_dictionary()
+# Initialize as None. Will be populated by get_naf_lookup().
+naf_detailed_lookup = None
+
+def get_naf_lookup():
+    """
+    Ensures the NAF dictionary is loaded and cached, then populates 
+    the global naf_detailed_lookup.
+    This function should be called once from the main app after st.set_page_config().
+    """
+    global naf_detailed_lookup
+    # load_naf_dictionary is cached by @st.cache_data.
+    # This call will either load fresh data or return cached data.
+    # We assign it to our global variable for other functions in this module to use.
+    if naf_detailed_lookup is None: # Populate only if not already done
+        naf_detailed_lookup = load_naf_dictionary()
+    return naf_detailed_lookup
 
 
 @lru_cache(maxsize=None)
@@ -118,7 +120,8 @@ def get_section_for_code(code):
 
 @lru_cache(maxsize=None)
 def get_codes_for_section(section_letter):
-    if not naf_detailed_lookup:
+    if naf_detailed_lookup is None:
+        print(f"{dt.datetime.now()} - WARNING - get_codes_for_section: NAF dictionary not initialized or failed to load.")
         return []
     if not section_letter:
         return []
@@ -136,7 +139,7 @@ def correspondance_NAF(code_naf_input):
     )
     if naf_detailed_lookup is None:
         print(
-            f"{dt.datetime.now()} - WARNING - correspondance_NAF: NAF dictionary not loaded. Input: '{code_naf_input}'."
+            f"{dt.datetime.now()} - WARNING - correspondance_NAF: NAF dictionary not initialized or failed to load. Input: '{code_naf_input}'."
         )
         return f"{code_naf_input} (Dico NAF non chargé)"
     if not code_naf_input or not isinstance(code_naf_input, str):
