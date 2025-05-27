@@ -438,7 +438,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 ws_entreprises.cell(
                     row=excel_row,
                     column=3,
-                    value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Alinkedin.com%2Fcompany%2F","Recherche LinkedIn")'
+                    value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Alinkedin.com","Recherche LinkedIn")'
                 )
                 # Col 4: Recherche Google Maps (B{excel_row} is Dénomination, G{excel_row} on ENTREPRISES sheet is "Adresse établissement")
                 ws_entreprises.cell(
@@ -872,7 +872,7 @@ def generate_user_erm_excel(
                 linkedin_col_idx = final_cols_for_sheet_structure.index("Recherche LinkedIn") + 1
                 ws_entreprises_export.cell(
                     row=excel_row, column=linkedin_col_idx,
-                    value=f'=HYPERLINK("https://www.google.com/search?q="&{col_letter_denomination}{excel_row}&"+site%3Alinkedin.com%2Fcompany%2F","Recherche LinkedIn")'
+                    value=f'=HYPERLINK("https://www.google.com/search?q="&{col_letter_denomination}{excel_row}&"+site%3Alinkedin.com","Recherche LinkedIn")'
                 )
                 # Recherche Google Maps
                 gmaps_col_idx = final_cols_for_sheet_structure.index("Recherche Google Maps") + 1

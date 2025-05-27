@@ -814,7 +814,7 @@ else:  # df_entreprises is not empty
     # Generate Link Columns
     if "Dénomination - Enseigne" in df_display_erm.columns:
         df_display_erm["LinkedIn"] = df_display_erm["Dénomination - Enseigne"].apply(
-            lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com%2Fcompany%2F"
+            lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com"
             if pd.notna(x) and x.strip() != "" 
             else None
         )
