@@ -1,14 +1,60 @@
 # --- Constantes API & Rate Limiting ---
+# Defines parameters for interacting with external APIs, focusing on rate limiting.
 MAX_REQUESTS_PER_SECOND = 6
 MIN_DELAY_BETWEEN_REQUESTS = (1.0 / MAX_REQUESTS_PER_SECOND) + 0.02
 MAX_RETRIES_ON_429 = 3
 INITIAL_RETRY_DELAY = 5
 API_BASE_URL = "https://recherche-entreprises.api.gouv.fr"
 
-# --- Fichiers ---
+# --- File Paths ---
+# Defines paths for data files used by the application.
+DEFAULT_ERM_FILE_PATH = "erm_data.json"
 NAF_FILE_PATH = "NAF.csv"
 
-# --- Dictionnaires NAF ---
+# --- ERM (Enterprise Relationship Management) DataFrame Column Definitions ---
+# Specifies the column structure for DataFrames used to store ERM data.
+ENTREPRISES_ERM_COLS = [
+    "SIRET",
+    "Dénomination - Enseigne",
+    "Activité NAF/APE Etablissement",
+    "Adresse établissement",
+    "Code effectif établissement",
+    "Nb salariés établissement",
+    "Effectif Numérique",
+    "Est siège social",
+    "Date de création Entreprise",
+    "Chiffre d'Affaires Entreprise",
+    "Résultat Net Entreprise",
+    "Année Finances Entreprise",
+    "Notes Personnelles",  # User-editable notes for an enterprise.
+    "Statut Piste",        # User-editable status for an enterprise lead.
+]
+
+CONTACTS_ERM_COLS = [
+    "ID Contact", # Unique identifier for a contact.
+    "SIRET Entreprise", 
+    "Prénom Nom",
+    "Poste",
+    "Direction",
+    "Email",
+    "Téléphone",
+    "Profil LinkedIn URL",
+    "Notes"
+]
+
+ACTIONS_ERM_COLS = [
+    "ID Action", # Unique identifier for an action.
+    "SIRET Entreprise", 
+    "ID Contact", # Link to a specific contact, if applicable.
+    "Type Action",
+    "Date Action",
+    "Date Échéance",
+    "Description/Notes",
+    "Statut Action",
+]
+
+# --- NAF Code to Section Mapping ---
+# Maps the first two digits of a NAF code to its corresponding section letter.
 NAF_SECTION_MAP = {
     "01": "A",
     "02": "A",
@@ -100,7 +146,8 @@ NAF_SECTION_MAP = {
     "99": "U",
 }
 
-# --- Dictionnaires Effectifs ---
+# --- Workforce Size (Effectifs) Dictionaries ---
+# Provides descriptions for workforce size codes.
 effectifs_tranches = {
     "NN": "Non employeuse",
     "00": "0 salarié",
@@ -120,7 +167,7 @@ effectifs_tranches = {
     "53": "10 000 salariés et plus",
 }
 
-# Mapping des tranches d'effectifs vers une valeur numérique pour le tri
+# Maps workforce size codes to a numerical value for sorting or quantitative analysis.
 effectifs_numerical_mapping = {
     "NN": 0, # Non employeuse
     "00": 0, # 0 salarié
@@ -140,7 +187,7 @@ effectifs_numerical_mapping = {
     "53": 10000, # 10 000 salariés et plus
 }
 
-# Mapping des valeurs numériques d'effectifs vers un préfixe alphabétique pour l'affichage
+# Maps numerical workforce values to an alphabetical prefix for display purposes (e.g., sorting in tables).
 effectif_numeric_to_letter_prefix = {
     # La valeur 0 (pour "NN" et "00") n'est pas incluse ici, 
     # donc ces tranches n'auront pas de préfixe alphabétique par défaut.
@@ -160,6 +207,8 @@ effectif_numeric_to_letter_prefix = {
     10000: "n" # Corresponds à "53" (10 000 salariés et plus)
 }
 
+# --- NAF Section Details ---
+# Provides descriptions and icons for NAF sections, used in UI elements.
 naf_sections_details = {
     "A": {"description": "Agriculture, sylviculture et pêche", "icon": "🚜"},
     "B": {"description": "Industries extractives", "icon": "⛏️"},
@@ -190,6 +239,7 @@ naf_sections_details = {
     # "U": {"description": "Activités extra-territoriales", "icon": "🌍"} #
 }
 
+# --- Workforce Size Groupings (Legacy or Alternative) ---
 effectifs_groupes = {
     "0 salarié": ["00"],
     "1 à 9 salariés": ["01", "02", "03"],
@@ -199,6 +249,8 @@ effectifs_groupes = {
     "Unités non-employeuses": ["NN"],
 }
 
+# --- Detailed Workforce Size Groupings for UI ---
+# Defines groups of workforce size codes with labels and icons for UI selection.
 effectifs_groupes_details = {
     "INDIV": {
         "label": "0 salarié (entreprise individuelle)",
@@ -225,7 +277,8 @@ effectifs_groupes_details = {
 }
 
 
-# --- Mappings pour Pydeck ---
+# --- Pydeck Map Visualization Mappings ---
+# Defines color and radius mappings for visualizing NAF sections and workforce sizes on a map.
 naf_color_mapping = {
     "A": [210, 4, 45],
     "B": [139, 69, 19],
@@ -271,7 +324,8 @@ size_mapping = {
     "N/A": 10,
 }
 
-# --- Colonnes pour l'affichage et l'export ---
+# --- Column Definitions for Display and Export ---
+# Specifies the order and selection of columns for table displays and Excel exports.
 COLS_DISPLAY_TABLE = [
     "SIRET",
     "Dénomination - Enseigne",
@@ -301,7 +355,7 @@ COLS_EXPORT_ORDER = [
     "Code effectif établissement",
     "Effectif Numérique", # Added for sorting
     "Raison sociale",
-    "Date de création Entreprise",
+    "Date de création Entreprise", # Note: This is company creation date, not establishment.
     "Nb total établissements ouverts",
     "Nb salariés entreprise",
     "Année Finances Entreprise",
@@ -314,7 +368,8 @@ COLS_EXPORT_ORDER = [
     "Radius",
 ]
 
-# --- Listes de valeurs pour les menus déroulants du ERM ---
+# --- Dropdown List Values for ERM ---
+# Defines static lists used to populate dropdown menus in the ERM interface (e.g., for Excel data validation).
 VALEURS_LISTE_CONTACTS_DIRECTION = [
     "Dir. Achats",
     "Dir. Commerciale",

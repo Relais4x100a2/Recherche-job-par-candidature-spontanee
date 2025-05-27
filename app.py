@@ -1,17 +1,17 @@
 import datetime
+import json
+import os
 
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
-
 import api_client
-import auth_utils
 import config
 import data_utils
 import geo_utils
 
 # --- SCRIPT START LOG ---
-print(f"{datetime.datetime.now()} - INFO - app.py script started.")
+# print(f"{datetime.datetime.now()} - INFO - app.py script started.") # Optional: uncomment for runtime debugging
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(layout="wide")
 
@@ -20,158 +20,114 @@ st.markdown(
     """
 <style>
     /* Cible les boutons primaires de Streamlit */
+    /* Cible les boutons primaires de Streamlit */
     .stButton > button[kind="primary"] {
-        font-weight: bold !important; /* Texte en gras */
-        border: 2px solid #4A4A4A !important; /* Bordure plus épaisse et foncée (ajustez la couleur si besoin) */
-        
-        
-        padding: 0.6em 1.2em !important;  /* Un peu plus de padding pour une plus grande taille */
-        box-shadow: 0px 2px 3px rgba(0, 0, 0, 0.2) !important;  /* Une légère ombre portée */
-        background-color: #00f8ff !important;  /* Changer la couleur de fond (exemple: Tomato) */
-        color: black !important;  /* Assurer que le texte reste lisible sur un fond coloré */
+        font-weight: bold !important;
+        border: 1px solid #2980B9 !important; /* Bleu plus foncé pour la bordure */
+        padding: 0.6em 1.2em !important;
+        box-shadow: 0px 2px 3px rgba(0, 0, 0, 0.2) !important;
+        background-color: #3498DB !important;  /* Bleu principal */
+        color: white !important;
     }
 
     .stButton > button[kind="primary"]:hover {
-        border-color: #000000 !important; /* Bordure plus foncée au survol */
-        background-color: #00ff9d !important; /* Couleur de fond légèrement différente au survol */
+        border-color: #1F618D !important; /* Bleu encore plus foncé */
+        background-color: #2E86C1 !important; /* Bleu légèrement plus foncé */
     }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# --- GLOBAL COLUMN DEFINITIONS ---
-# Moved here to be defined before use in session state initialization
-EXPECTED_ENTREPRISE_COLS = [
-    "SIRET",
-    "Dénomination - Enseigne",
-    "Activité NAF/APE Etablissement",
-    "Adresse établissement",
-    "Code effectif établissement", # Ajouté pour la conversion fiable
-    "Nb salariés établissement",
-    "Effectif Numérique",  # Ajout de la colonne pour le tri/filtre numérique
-    "Est siège social",
-    "Date de création Entreprise",
-    "Chiffre d'Affaires Entreprise",
-    "Résultat Net Entreprise",
-    "Année Finances Entreprise"
-]
-EXPECTED_CONTACT_COLS = [
-    "Prénom Nom",
-    "Entreprise",
-    "Poste",
-    "Direction",
-    "Email",
-    "Téléphone",
-    "Profil LinkedIn URL",
-    "Notes",
-]
-EXPECTED_ACTION_COLS = [
-    "Entreprise",
-    "Contact (Prénom Nom)",
-    "Type Action",
-    "Date Action",
-    "Description/Notes",
-    "Statut Action",
-    "Statut Opportunuité Taf",
-]
+# --- ERM DATA HANDLING FUNCTIONS ---
+def load_global_erm_data(file_path=config.DEFAULT_ERM_FILE_PATH):
+    """
+    Charges les données ERM (Entreprises, Contacts, Actions) depuis un fichier JSON global.
+    Initialise des DataFrames vides avec les schémas définis dans config.py si le fichier n'existe pas ou est corrompu.
+    """
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            df_e = pd.DataFrame(data.get("entreprises", []))
+            df_c = pd.DataFrame(data.get("contacts", []))
+            df_a = pd.DataFrame(data.get("actions", []))
 
-# --- DEFAULT USER FOR ERM ---
-DEFAULT_USERNAME = ""
+            # Convert specific columns to datetime objects
+            date_cols_entreprise = ["Date de création Entreprise"]
+            date_cols_action = ["Date Action", "Date Échéance"]
+
+            for col in date_cols_entreprise:
+                if col in df_e.columns:
+                    df_e[col] = pd.to_datetime(df_e[col], errors='coerce')
+            for col in date_cols_action:
+                if col in df_a.columns:
+                    df_a[col] = pd.to_datetime(df_a[col], errors='coerce')
+
+        except (json.JSONDecodeError, KeyError) as e:
+            st.error(f"Erreur de lecture ou format incorrect du fichier ERM ({file_path}): {e}. Un nouveau fichier sera utilisé/créé si des données sont sauvegardées.")
+            df_e = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS)
+            df_c = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
+            df_a = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+    else:
+        df_e = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS)
+        df_c = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
+        df_a = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+
+    # Ensure all expected columns are present and in correct order
+    df_e = df_e.reindex(columns=config.ENTREPRISES_ERM_COLS)
+    df_c = df_c.reindex(columns=config.CONTACTS_ERM_COLS)
+    df_a = df_a.reindex(columns=config.ACTIONS_ERM_COLS)
+    
+    return df_e, df_c, df_a
+
+def save_global_erm_data(df_e, df_c, df_a, file_path=config.DEFAULT_ERM_FILE_PATH):
+    """
+    Sauvegarde les DataFrames ERM (Entreprises, Contacts, Actions) dans un fichier JSON global.
+    Convertit les DataFrames en dictionnaires, gérant les NaNs pour la sérialisation JSON.
+    Utilise default=str pour gérer la sérialisation des objets datetime.
+    """
+    data_to_save = {
+        "entreprises": df_e.astype(object).where(pd.notnull(df_e), None).to_dict(orient="records"),
+        "contacts": df_c.astype(object).where(pd.notnull(df_c), None).to_dict(orient="records"),
+        "actions": df_a.astype(object).where(pd.notnull(df_a), None).to_dict(orient="records"),
+    }
+    try:
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data_to_save, f, indent=2, ensure_ascii=False, default=str)
+    except Exception as e:
+        st.error(f"Erreur lors de la sauvegarde des données ERM : {e}")
+
+# --- CALLBACKS FOR ERM DATA MODIFICATION ---
+def on_erm_data_changed():
+    """Callback pour sauvegarder les données ERM lorsque des modifications sont détectées."""
+    save_global_erm_data(st.session_state.get('df_entreprises_erm'), st.session_state.get('df_contacts_erm'), st.session_state.get('df_actions_erm'))
+
 
 # --- INITIALISATION DE L'ÉTAT DE SESSION POUR L'AUTHENTIFICATION ET ERM ---
-print(f"{datetime.datetime.now()} - INFO - Initializing session state variables.")
-if "username" not in st.session_state:
-    st.session_state.username = DEFAULT_USERNAME
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'username' initialized to '{DEFAULT_USERNAME}'."
-    )
-if "erm_data" not in st.session_state:
-    st.session_state.erm_data = auth_utils.load_user_erm_data(st.session_state.username)
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'erm_data' initialized to empty lists."
-    )
-if "df_entreprises" not in st.session_state:
-    # Initialiser à partir de erm_data si c'est la première fois
-    df_e_initial = pd.DataFrame(st.session_state.erm_data.get("entreprises", []))
-    st.session_state.df_entreprises = data_utils.ensure_df_schema(
-        df_e_initial, EXPECTED_ENTREPRISE_COLS
-    )
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'df_entreprises' initialized from erm_data. Count: {len(st.session_state.df_entreprises)}"
-    )
-else:
-    # S'assurer que le schéma est correct lors des rechargements suivants (au cas où)
-    st.session_state.df_entreprises = data_utils.ensure_df_schema(
-        st.session_state.df_entreprises, EXPECTED_ENTREPRISE_COLS
-    )
-
-if "df_contacts" not in st.session_state:
-    df_c_initial = pd.DataFrame(st.session_state.erm_data.get("contacts", []))
-    st.session_state.df_contacts = data_utils.ensure_df_schema(
-        df_c_initial, EXPECTED_CONTACT_COLS
-    )
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'df_contacts' initialized from erm_data. Count: {len(st.session_state.df_contacts)}"
-    )
-else:
-    st.session_state.df_contacts = data_utils.ensure_df_schema(
-        st.session_state.df_contacts, EXPECTED_CONTACT_COLS
-    )
-
-if "df_actions" not in st.session_state:
-    df_a_initial = pd.DataFrame(st.session_state.erm_data.get("actions", []))
-    st.session_state.df_actions = data_utils.ensure_df_schema(
-        df_a_initial, EXPECTED_ACTION_COLS
-    )
-    if "Date Action" in st.session_state.df_actions.columns:
-        st.session_state.df_actions["Date Action"] = pd.to_datetime(
-            st.session_state.df_actions["Date Action"], errors="coerce"
-        )
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'df_actions' initialized from erm_data. Count: {len(st.session_state.df_actions)}"
-    )
-else:
-    st.session_state.df_actions = data_utils.ensure_df_schema(
-        st.session_state.df_actions, EXPECTED_ACTION_COLS
-    )
-    if (
-        "Date Action" in st.session_state.df_actions.columns
-    ):  # Assurer le type Date également lors des rechargements
-        st.session_state.df_actions["Date Action"] = pd.to_datetime(
-            st.session_state.df_actions["Date Action"], errors="coerce"
-        )
-
+# print(f"{datetime.datetime.now()} - INFO - Initializing session state variables.") # Optional: uncomment for runtime debugging
+# Initialisation des DataFrames ERM s'ils n'existent pas encore dans la session.
+# Sera rempli par load_global_erm_data plus tard.
+if "df_entreprises_erm" not in st.session_state:
+    st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS)
+if "df_contacts_erm" not in st.session_state:
+    st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
+if "df_actions_erm" not in st.session_state:
+    st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
 if "confirm_flush" not in st.session_state:
     st.session_state.confirm_flush = False
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'confirm_flush' initialized to False."
-    )
 if "editor_key_version" not in st.session_state:
     st.session_state.editor_key_version = 0
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'editor_key_version' initialized to 0."
-    )
 if "df_search_results" not in st.session_state:
     st.session_state.df_search_results = None
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'df_search_results' initialized to None."
-    )
 if "search_coordinates" not in st.session_state:
     st.session_state.search_coordinates = None
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'search_coordinates' initialized to None."
-    )
 if "search_radius" not in st.session_state:
     st.session_state.search_radius = None
-    print(
-        f"{datetime.datetime.now()} - INFO - Session state 'search_radius' initialized to None."
-    )
 
-
-# Le bloc "LOAD INITIAL ERM DATA INTO DATAFRAMES" a été intégré ci-dessus
-# et est donc supprimé d'ici.
-
+# --- GESTION DE L'ÉTAT DE SESSION POUR LES PARAMÈTRES DE RECHERCHE ---
+# Initialise les sélections par défaut pour les filtres NAF et effectifs
+# si elles ne sont pas déjà présentes dans l'état de session.
 # --- TITRE ET DESCRIPTION (Toujours visible) ---
 st.title(
     "🔎 Application de recherche d'employeurs potentiels pour candidatures spontanées"
@@ -180,9 +136,10 @@ st.markdown(
     "Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés."
 )
 
+
 st.header("Paramètres de recherche")
 
-# --- Gestion état session ---
+# --- Gestion état session pour les filtres de recherche ---
 if "selected_naf_letters" not in st.session_state:
     st.session_state.selected_naf_letters = ["F", "G", "J"]
 if "selected_effectifs_codes" not in st.session_state:
@@ -207,9 +164,7 @@ else:
             st.session_state.selected_specific_naf_codes
         )
 
-# --- CONTENU PRINCIPAL DE L'APPLICATION  ---
-
-# --- Initialize and Verify NAF data loading (after st.set_page_config) ---
+# --- Initialisation et Vérification du chargement des données NAF ---
 # This call will trigger load_naf_dictionary (and its caching) 
 # and populate data_utils.naf_detailed_lookup
 data_utils.get_naf_lookup()
@@ -217,23 +172,29 @@ data_utils.get_naf_lookup()
 if data_utils.naf_detailed_lookup is None: # Check if loading was successful
     st.error(
         "Erreur critique : Le dictionnaire NAF n'a pas pu être chargé. "
-        "Vérifiez les logs de la console pour plus de détails (ex: fichier NAF.csv manquant ou corrompu). "
-        "L'application ne peut pas continuer."
+        "Vérifiez la présence et le format du fichier NAF.csv. L'application ne peut pas continuer."   
     )
     st.stop()
+
+# --- Chargement des données ERM dans l'état de session ---
+if "erm_data_loaded" not in st.session_state:
+    st.session_state.df_entreprises_erm, \
+    st.session_state.df_contacts_erm, \
+    st.session_state.df_actions_erm = load_global_erm_data()
+    st.session_state.erm_data_loaded = True    
 
 col_gauche, col_droite = st.columns(2)
 
 with col_gauche:
     st.subheader("📍 Localisation")
-    # Créer des sous-colonnes pour réduire la largeur des champs de saisie
+    # Utilisation de sous-colonnes pour contrôler la largeur des champs de saisie
     input_col_loc, _ = st.columns(
         [2, 1]
     )  # Les champs prendront 2/3 de la largeur de col_gauche
     with input_col_loc:
         adresse_input = st.text_input(
             "Adresse ou commune de référence",
-            placeholder="Ex: 1 AVENUE DU DOCTEUR GLEY 75020 PARIS",
+            placeholder="Ex: 1, avenue du docteur Gley 75020 Paris",
             help="Veuillez saisir une adresse, idéalement complète, pour lancer la recherche.",
         )
         default_radius = 5.0
@@ -249,6 +210,10 @@ with col_gauche:
     st.subheader("📊 Tranches d'effectifs salariés (Établissement)")
 
     def on_effectif_change(group_key_arg, codes_in_group_arg):
+        """
+        Callback pour la sélection des groupes de tranches d'effectifs.
+        Met à jour st.session_state.selected_effectifs_codes en fonction de la sélection du groupe.
+        """
         eff_key = f"eff_group_{group_key_arg}"
         is_selected = st.session_state[eff_key]
         current_selection_codes_eff = set(st.session_state.selected_effectifs_codes)
@@ -259,7 +224,7 @@ with col_gauche:
         st.session_state.selected_effectifs_codes = sorted(
             list(current_selection_codes_eff)
         )
-        # Pas besoin de rerun ici
+        # Streamlit gère le rerun après l'exécution du callback on_change.
 
     cols_eff = st.columns(2)
     col_idx_eff = 0
@@ -278,17 +243,6 @@ with col_gauche:
             )
         col_idx_eff += 1
 
-    # --- Bouton de Lancement ---
-    st.write("")
-    st.write("")
-    lancer_recherche = st.button("🚀 Rechercher les entreprises", type="primary")
-    
-    # Explanation about adding results
-    st.info(
-        "Note : Les résultats d'une nouvelle recherche sont **ajoutés** au tableau ci-dessous. "
-        "Utilisez le bouton 'Effacer le tableau des établissements' pour repartir d'une liste vide."
-    )
-
 with col_droite:
     st.subheader("📂 Secteurs d'activité NAF")
     st.caption(
@@ -296,6 +250,11 @@ with col_droite:
     )
 
     def on_section_change():
+        """
+        Callback pour la sélection des sections NAF.
+        Met à jour st.session_state.selected_naf_letters.
+        Si une section est désélectionnée, les codes NAF spécifiques associés à cette section sont retirés de la sélection.
+        """
         current_sections = []
         for letter in config.naf_sections_details:  # Utiliser la nouvelle structure
             if st.session_state.get(f"naf_section_{letter}", False):
@@ -308,7 +267,7 @@ with col_droite:
                 if data_utils.get_section_for_code(code)
                 in st.session_state.selected_naf_letters
             }
-            # Pas besoin de rerun ici, Streamlit le fait après le callback
+            # Streamlit gère le rerun.
 
     cols_naf = st.columns(2)
     col_idx_naf = 0
@@ -332,6 +291,10 @@ with col_droite:
         else:
 
             def on_specific_naf_change(change_type, section_letter=None, code=None):
+                """
+                Callback pour la sélection des codes NAF spécifiques.
+                Gère la sélection/désélection de tous les codes d'une section ou d'un code individuel.
+                """
                 if change_type == "select_all":
                     select_all_key = f"select_all_{section_letter}"
                     should_select_all = st.session_state[select_all_key]
@@ -353,7 +316,7 @@ with col_droite:
                         st.session_state.selected_specific_naf_codes.add(code)
                     else:
                         st.session_state.selected_specific_naf_codes.discard(code)
-                # Pas besoin de rerun ici, Streamlit le fait après le callback
+                # Streamlit gère le rerun.
 
             for section_letter in selected_sections_sorted:
                 section_details = config.naf_sections_details.get(section_letter)
@@ -405,11 +368,27 @@ with col_droite:
                 f"{len(st.session_state.selected_specific_naf_codes)} code(s) NAF spécifique(s) sélectionné(s) au total."
             )
 
-        st.caption(
-            f"{len(st.session_state.selected_specific_naf_codes)} code(s) NAF spécifique(s) sélectionné(s) au total."
-        )
 
-st.markdown("---")  # Séparateur pleine largeur
+st.markdown("---") # Séparateur avant la section du bouton de recherche
+
+# Section pour le bouton de recherche et les informations associées
+# Le bouton est centré en utilisant des colonnes "spacer"
+col_spacer_gauche, col_contenu_bouton, col_spacer_droit = st.columns([2, 3, 2]) # Ajustez les ratios si besoin (ex: [1,1,1] ou [2,3,2])
+
+with col_contenu_bouton:
+    lancer_recherche = st.button(
+        "🚀 Rechercher les entreprises", 
+        type="primary", 
+        key="main_search_button", 
+        use_container_width=True # Le bouton prendra toute la largeur de col_contenu_bouton
+    )
+
+# Le message d'information est placé sous le bouton, occupant la pleine largeur
+st.info(
+    "Note : Les résultats d'une nouvelle recherche sont **ajoutés** au tableau ci-dessous. "
+    "Utilisez le bouton 'Effacer le tableau des établissements' dans la 'Zone de danger' pour repartir d'une liste vide."
+    )
+st.markdown("---")
 
 # --- ZONE D'AFFICHAGE DES RÉSULTATS ---
 results_container = st.container()
@@ -417,7 +396,7 @@ results_container = st.container()
 # --- LOGIQUE PRINCIPALE DE RECHERCHE ---
 if lancer_recherche:
     results_container.empty()  # Nettoyer les anciens résultats
-
+    
     # --- Vérifications initiales ---
     if not adresse_input or not adresse_input.strip():
         st.error("⚠️ Veuillez saisir une adresse de référence pour lancer la recherche.")
@@ -429,10 +408,12 @@ if lancer_recherche:
         st.warning("⚠️ Veuillez sélectionner au moins une tranche d'effectifs.")
         st.stop()
 
-    # --- Construction de la liste finale des codes NAF pour l'API ---
+    # Construction de la liste finale des codes NAF pour l'appel API.
+    # Si des codes spécifiques sont sélectionnés pour une section, ils sont utilisés.
+    # Sinon, tous les codes de la section sélectionnée sont utilisés.
     final_codes_for_api = set()
     selected_specifics = st.session_state.selected_specific_naf_codes
-
+    
     for section_letter in st.session_state.selected_naf_letters:
         specifics_in_section = {
             code
@@ -467,27 +448,13 @@ if lancer_recherche:
         # 1. Géocodage
         coordonnees = geo_utils.geocoder_ban_france(adresse_input)
         if coordonnees is None:
-            print(
-                f"{datetime.datetime.now()} - ERROR - Geocoding failed for address: {adresse_input}."
-            )
+            # L'erreur est déjà affichée par geocoder_ban_france
             st.stop()
         lat_centre, lon_centre = coordonnees
-        print(
-            f"{datetime.datetime.now()} - INFO - Geocoding successful for address: {adresse_input} -> Lat: {lat_centre}, Lon: {lon_centre}."
-        )
 
         # 2. Lancer la recherche API
-        print(
-            f"{datetime.datetime.now()} - INFO - Preparing to call API rechercher_geographiquement_entreprises."
-        )
-        print(
-            f"{datetime.datetime.now()} - INFO - API Params: adresse_input='{adresse_input}', radius_input={radius_input}, final_codes_for_api='{final_api_params['activite_principale']}', selected_effectifs_codes='{st.session_state.selected_effectifs_codes}'."
-        )
         entreprises_trouvees = api_client.rechercher_geographiquement_entreprises(
             lat_centre, lon_centre, radius_input, final_api_params
-        )
-        print(
-            f"{datetime.datetime.now()} - INFO - API call completed. Number of raw results received: {len(entreprises_trouvees) if entreprises_trouvees is not None else 'Error/None'}."
         )
 
         # --- Traitement et Affichage des résultats ---
@@ -495,20 +462,16 @@ if lancer_recherche:
             df_resultats = data_utils.traitement_reponse_api(
                 entreprises_trouvees, st.session_state.selected_effectifs_codes
             )
-            print(
-                f"{datetime.datetime.now()} - INFO - API results processed. Number of filtered establishments: {len(df_resultats)}."
-            )
 
-            # Store results and context in session state
+            # Stocker les résultats et le contexte de la recherche dans l'état de session
+            # pour permettre un affichage persistant même après des reruns (ex: ajout à l'ERM).
             st.session_state.df_search_results = df_resultats.copy()
             st.session_state.search_coordinates = (lat_centre, lon_centre)
             st.session_state.search_radius = radius_input
-            print(
-                f"{datetime.datetime.now()} - INFO - Search results and context stored in session state."
-            )
 
-            # The success message, map, and legend are now handled outside this block,
-            # using session state, to persist across reruns.
+            # Les messages de succès, la carte et la légende sont gérés en dehors de ce bloc `if lancer_recherche`,
+            # en utilisant l'état de session, pour persister à travers les reruns (par exemple,
+            # après un rerun déclenché par l'ajout d'une entreprise à l'ERM).
 
             # Display messages for no results or API errors (these don't need to persist beyond the initial search action)
             if entreprises_trouvees is not None:
@@ -533,62 +496,44 @@ if lancer_recherche:
         # --- Ajout automatique des nouvelles entreprises à l'ERM en session ---
         if not df_resultats.empty:  # Uniquement si des résultats de recherche existent
             # S'assurer que df_entreprises existe et a la colonne SIRET, sinon initialiser comme vide.
-            if "SIRET" not in st.session_state.df_entreprises.columns:
-                # This case implies df_entreprises might be empty or from a very old format.
-                # For safety, treat as if no ERM entreprises exist for comparison.
-                sirets_in_erm = pd.Series(dtype="object")
+            if "SIRET" not in st.session_state.df_entreprises_erm.columns: # Devrait être initialisé avec les colonnes
+                sirets_in_erm = pd.Series(dtype="object") # Cas de sécurité si df_entreprises_erm est mal initialisé
             else:
-                sirets_in_erm = st.session_state.df_entreprises["SIRET"]
+                sirets_in_erm = st.session_state.df_entreprises_erm["SIRET"]
 
             # Identifier les nouvelles entreprises
             df_new_entreprises = df_resultats[
                 ~df_resultats["SIRET"].isin(sirets_in_erm)
             ].copy()  # Use .copy() to avoid SettingWithCopyWarning
-            print(
-                f"{datetime.datetime.now()} - INFO - Identified {len(df_new_entreprises)} new entreprises not in ERM."
-            )
 
             if (
                 not df_new_entreprises.empty
             ):  # Si de nouvelles entreprises sont trouvées
-                # Automatic addition of new companies
-                print(
-                    f"{datetime.datetime.now()} - INFO - Automatically adding {len(df_new_entreprises)} new entreprises to ERM for user '{st.session_state.username}'."
-                )
-                # Colonnes attendues dans le ERM (déjà définies dans l'onglet Entreprises)
-                expected_entreprise_cols_for_add = [
-                    "SIRET",
-                    "Dénomination - Enseigne", # Maintenir le nom de la colonne combinée
-                    "Activité NAF/APE Etablissement", # Correction de la casse
-                    "Adresse établissement",
-                    "Code effectif établissement", # S'assurer qu'elle est attendue ici aussi
-                    "Effectif Numérique", # S'assurer qu'elle est attendue ici aussi
-                    "Nb salariés établissement",
-                    "Est siège social",
-                    "Date de création Entreprise",
-                    "Chiffre d'Affaires Entreprise",
-                    "Résultat Net Entreprise",
-                    "Année Finances Entreprise",
-                ]
 
                 df_to_add = df_new_entreprises.copy()
 
-                for col in expected_entreprise_cols_for_add:
+                # S'assurer que toutes les colonnes de config.ENTREPRISES_ERM_COLS existent dans df_to_add
+                # Les colonnes non présentes dans df_new_entreprises (issues de la recherche)
+                # mais attendues dans l'ERM (comme 'Notes Personnelles', 'Statut Piste') seront ajoutées avec NA.
+                for col in config.ENTREPRISES_ERM_COLS:
                     if col not in df_to_add.columns:
                         df_to_add[col] = pd.NA
+                
+                # Sélectionner et ordonner les colonnes selon config.ENTREPRISES_ERM_COLS
+                df_to_add = df_to_add.reindex(columns=config.ENTREPRISES_ERM_COLS)
 
-                # Select and order columns according to expected_entreprise_cols
-                # Using reindex will also add any missing expected columns with NA
-                df_to_add = df_to_add.reindex(columns=expected_entreprise_cols_for_add)
+                st.session_state.df_entreprises_erm = pd.concat(
+                    [st.session_state.df_entreprises_erm, df_to_add], ignore_index=True
+                ).reindex(columns=config.ENTREPRISES_ERM_COLS) # Assurer l'ordre et la présence de toutes les colonnes ERM
 
-                st.session_state.df_entreprises = data_utils.add_entreprise_records(
-                    st.session_state.df_entreprises,  # current_df_entreprises
-                    df_to_add,  # new_records_df
-                    expected_entreprise_cols_for_add,  # expected_cols
-                )
-                print(
-                    f"{datetime.datetime.now()} - INFO - Added {len(df_to_add)} new entreprises to session state df_entreprises. New total: {len(st.session_state.df_entreprises)}."
-                )
+                # Ensure 'Date de création Entreprise' is datetime after concatenation
+                if "Date de création Entreprise" in st.session_state.df_entreprises_erm.columns:
+                    st.session_state.df_entreprises_erm["Date de création Entreprise"] = pd.to_datetime(
+                        st.session_state.df_entreprises_erm["Date de création Entreprise"],
+                        errors='coerce'  # Convert unparseable dates to NaT
+                    )
+
+                on_erm_data_changed() # Sauvegarder les modifications
 
                 st.success(
                     f"{len(df_new_entreprises)} nouvelle(s) entreprise(s) automatiquement ajoutée(s) à votre ERM. N'oubliez pas de sauvegarder vos modifications !"
@@ -597,9 +542,6 @@ if lancer_recherche:
                 st.rerun()
 
             elif not df_resultats.empty:
-                print(
-                    f"{datetime.datetime.now()} - INFO - No new entreprises to add to ERM from search results."
-                )
                 st.info(
                     "✔️ Toutes les entreprises trouvées dans cette recherche sont déjà dans votre ERM ou la recherche n'a pas retourné de nouvelles entreprises à ajouter."
                 )
@@ -625,6 +567,7 @@ with results_container:
         )
 
         # Affichage Carte
+        # La carte est affichée si des résultats valides (avec coordonnées) existent.
         st.subheader("Carte des établissements trouvés")
         df_map_display = df_search_results_display.dropna(
             subset=["Latitude", "Longitude", "Radius", "Color"]
@@ -632,6 +575,7 @@ with results_container:
 
         if not df_map_display.empty:
             zoom_level = 11
+            # Ajustement du niveau de zoom initial en fonction du rayon de recherche
             if radius_display <= 1:
                 zoom_level = 14
             elif radius_display <= 5:
@@ -680,6 +624,7 @@ with results_container:
             st.pydeck_chart(deck)
 
             # Affichage Légende
+            # La légende est générée dynamiquement en fonction des données affichées sur la carte.
             st.subheader("Légende")
             cols_legende = st.columns([1, 2])
             with cols_legende[0]:
@@ -693,7 +638,7 @@ with results_container:
                     "53": "Très Grand",
                 }
                 active_eff_codes = set(
-                    st.session_state.selected_effectifs_codes  # This still comes from the sidebar selection for consistency
+                    st.session_state.selected_effectifs_codes
                 )
                 displayed_legend_sizes = set()
                 for (
@@ -754,27 +699,25 @@ with results_container:
                 "Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte."
             )
 
-        # L'utilisateur peut toujours télécharger son ERM complet plus bas.
+    # Les messages "aucun résultat" ou "erreur API" sont gérés dans le bloc `if lancer_recherche:`
+    # car ils sont un retour direct à l'action de recherche et n'ont pas besoin de persister
+    # de la même manière que la carte pour des résultats réussis après un rerun.
 
-    # Note: The messages for "no results" or "API error" are handled within the `if lancer_recherche:` block
-    # as they are direct feedback to the search action and don't necessarily need to persist in the same way
-    # the map for successful results does after a rerun triggered by adding to ERM.
-
-print(
-    f"{datetime.datetime.now()} - INFO - Preparing to display ERM tabs for user '{st.session_state.username}'."
-)
-if st.session_state.df_entreprises.empty:
+# --- AFFICHAGE DU TABLEAU ERM ---
+# Ce tableau affiche les entreprises stockées dans st.session_state.df_entreprises_erm.
+if st.session_state.df_entreprises_erm.empty:
     st.info(
         "Aucune entreprise dans votre liste pour le moment. Lancez une recherche pour en ajouter."
     )
         # The clear button is hidden if the table is already empty
-else:  # df_entreprises is not empty
+else:  # df_entreprises_erm is not empty
     st.subheader("Tableau des établissements trouvés")
 
     # Create a copy for display modifications
-    df_display_erm = st.session_state.df_entreprises.copy()
+    df_display_erm = st.session_state.df_entreprises_erm.copy()
 
-    # Ensure 'Effectif Numérique' is correctly populated for display formatting
+    # Assurer que 'Effectif Numérique' est correctement peuplé pour le formatage de l'affichage
+    # et le tri potentiel (bien que le tri ne soit pas directement implémenté ici pour l'affichage).
     if 'Code effectif établissement' in df_display_erm.columns:
         df_display_erm['Effectif Numérique'] = df_display_erm['Code effectif établissement'] \
             .map(config.effectifs_numerical_mapping) \
@@ -789,8 +732,8 @@ else:  # df_entreprises is not empty
         df_display_erm['Effectif Numérique'] = pd.to_numeric(df_display_erm['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
 
 
-    # --- MODIFICATION FOR "Nb salariés établissement" DISPLAY ---
     if 'Effectif Numérique' in df_display_erm.columns and 'Nb salariés établissement' in df_display_erm.columns:
+        # Formate la colonne "Nb salariés établissement" pour l'affichage en préfixant avec une lettre basée sur l'effectif numérique.
         def format_effectif_for_display(row):
             num_val = row.get('Effectif Numérique') # Ex: 0, 1, 3, 10...
             text_val = row.get('Nb salariés établissement') # Ex: "1 ou 2 salariés"
@@ -809,9 +752,8 @@ else:  # df_entreprises is not empty
             return f"{letter_prefix} - {text_upper}" if letter_prefix else text_upper
         
         df_display_erm['Nb salariés établissement'] = df_display_erm.apply(format_effectif_for_display, axis=1)
-    # --- END MODIFICATION ---
 
-    # Generate Link Columns
+    # Génération des colonnes de liens pour LinkedIn, Google Maps, et Indeed.
     if "Dénomination - Enseigne" in df_display_erm.columns:
         df_display_erm["LinkedIn"] = df_display_erm["Dénomination - Enseigne"].apply(
             lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com"
@@ -840,14 +782,11 @@ else:  # df_entreprises is not empty
                 else None
             )
     # Définir les colonnes à afficher et leur ordre
-    # EXPECTED_ENTREPRISE_COLS includes "Effectif Numérique", but we don't want to display it as a separate column.
-    # We construct the display list carefully.
+    # "Effectif Numérique" n'est pas affiché directement mais utilisé pour formater "Nb salariés établissement".
     display_order_base = [
         "SIRET", "Dénomination - Enseigne", 
-        # Links will be inserted after Dénomination
         "Activité NAF/APE Etablissement", "Adresse établissement", 
-        "Nb salariés établissement", # This is the modified one
-        # "Effectif Numérique" n'est plus affiché directement, mais utilisé pour le formatage ci-dessus
+        "Nb salariés établissement", # Colonne formatée
         "Est siège social", "Date de création Entreprise",
         "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise"
     ]
@@ -866,7 +805,7 @@ else:  # df_entreprises is not empty
         col for col in cols_to_display_erm_tab if col in df_display_erm.columns
     ]
 
-    # Define column configurations, excluding "Effectif Numérique"
+    # Configuration des colonnes pour st.dataframe, incluant les types de colonnes et les labels.
     column_config_map = {
         "LinkedIn": st.column_config.LinkColumn("LinkedIn", display_text="🔗 LinkedIn"),
         "Google Maps": st.column_config.LinkColumn("Google Maps", display_text="📍 Google Maps"),
@@ -885,29 +824,18 @@ else:  # df_entreprises is not empty
         use_container_width=True,
     )
 
-print(f"{datetime.datetime.now()} - INFO - TAB ENTREPRISES: Before final ensure_df_schema. Shape: {st.session_state.df_entreprises.shape}")
-
-# Ensure final schema using the utility function
-st.session_state.df_entreprises = data_utils.ensure_df_schema(
-    st.session_state.df_entreprises, EXPECTED_ENTREPRISE_COLS
-)
-print(f"{datetime.datetime.now()} - INFO - TAB ENTREPRISES: End. df_entreprises final count for this run: {len(st.session_state.df_entreprises)}.")
+# --- BOUTON DE TÉLÉCHARGEMENT ERM ---
 download_button_key = "download_user_erm_excel_button"
-# We can't directly detect the click on st.download_button in the same way as st.button.
-# However, the data preparation for it implies intent.
-print(
-    f"{datetime.datetime.now()} - INFO - Preparing data for user ERM download for user '{st.session_state.username}'."
-)
 try:
     user_erm_excel_data = data_utils.generate_user_erm_excel(
-        st.session_state.df_entreprises,
-        st.session_state.df_contacts,
-        st.session_state.df_actions,
+        st.session_state.df_entreprises_erm,
+        st.session_state.df_contacts_erm,
+        st.session_state.df_actions_erm,
     )
     st.download_button(
         label="📥 Télécharger les résultats dans un classeur Excel)",
         data=user_erm_excel_data,
-        file_name=f"mon_erm_{st.session_state.username}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        file_name=f"mon_erm_global_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=download_button_key,
     )
@@ -917,13 +845,15 @@ st.markdown("---")
 st.markdown(" Propulsé avec les API Data Gouv : [API Recherche d’Entreprises](https://www.data.gouv.fr/fr/dataservices/api-recherche-dentreprises/) & [API BAN France](https://www.data.gouv.fr/fr/dataservices/api-adresse-base-adresse-nationale-ban/)")
 st.markdown("---")
 # --- Bouton pour effacer le tableau des établissements ---
-if not st.session_state.df_entreprises.empty:
+if not st.session_state.df_entreprises_erm.empty:
     with st.expander("Zone de danger", expanded=True):
         st.warning("Attention : Cette action effacera **toutes** les entreprises actuellement affichées dans le tableau.")
         if st.button("🗑️ Effacer le tableau des établissements", key="clear_table_button_in_danger_zone"): # Ajout d'une clé unique
-            st.session_state.df_entreprises = data_utils.ensure_df_schema(
-                pd.DataFrame(), EXPECTED_ENTREPRISE_COLS
-            )
+            st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS) # Réinitialise le DataFrame
+            # Optionnel: effacer aussi contacts et actions si liés, ou laisser pour une gestion manuelle
+            # st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
+            # st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+            on_erm_data_changed() # Sauvegarder le fait que c'est vide
             st.session_state.editor_key_version += 1 # Increment key to force editor refresh if it were used
             st.session_state.df_search_results = None # Clear search results display as well
             st.rerun() # Rerun to update the display immediately
