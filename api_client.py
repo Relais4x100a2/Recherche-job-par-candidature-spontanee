@@ -4,8 +4,7 @@ import concurrent.futures
 import threading
 import time
 import collections
-import datetime as dt # Renamed for convenience if 'datetime' object is used
-from datetime import datetime, timezone # Keep this for timezone object if used explicitly
+import datetime as dt
 
 # Importer la configuration et les utils
 import config
@@ -63,7 +62,7 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
     Parallélise les appels après la première page, respecte le rate limit et gère les erreurs 429.
     """
     print(f"{dt.datetime.now()} - INFO - rechercher_geographiquement_entreprises called with lat={lat}, long={long}, radius={radius}, api_params={api_params}")
-    url = f"{config.API_BASE_URL}/near_point" # Utiliser config
+    url = f"{config.API_BASE_URL}/near_point"
     base_params = api_params.copy()
     base_params.update({
         'lat': lat,
@@ -81,7 +80,7 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
         request_timestamps.clear()
         print(f"{dt.datetime.now()} - INFO - Request timestamps deque cleared.")
 
-    search_type = "codes NAF spécifiques" # Toujours le cas maintenant
+    search_type = "codes NAF spécifiques"
     initial_status_message = f"Initialisation de la recherche ({search_type}) autour de ({lat:.4f}, {long:.4f})..."
     with st.status(initial_status_message, expanded=True) as status:
 
@@ -89,7 +88,7 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
         status.update(label="Récupération de la première page...")
         print(f"{dt.datetime.now()} - INFO - Starting fetch for page 1.")
         start_time_page1 = time.time()
-        page1_result = fetch_first_page(url, base_params, headers) # Utilise la fonction locale
+        page1_result = fetch_first_page(url, base_params, headers)
 
         if not page1_result["success"]:
             print(f"{dt.datetime.now()} - ERROR - Failed to fetch page 1: {page1_result['error_message']}")
@@ -139,8 +138,8 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
             print(f"{dt.datetime.now()} - INFO - [Page {page_num}] Starting fetch.")
             params_page = base_params.copy()
             params_page['page'] = page_num
-            current_retry_delay = config.INITIAL_RETRY_DELAY # Utiliser config
-            for attempt in range(config.MAX_RETRIES_ON_429 + 1): # Utiliser config
+            current_retry_delay = config.INITIAL_RETRY_DELAY
+            for attempt in range(config.MAX_RETRIES_ON_429 + 1):
                 print(f"{dt.datetime.now()} - INFO - [Page {page_num}] Attempt {attempt + 1}/{config.MAX_RETRIES_ON_429 + 1}.")
                 try:
                     # Rate Limiting
@@ -148,9 +147,9 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
                         now = time.time()
                         while request_timestamps and request_timestamps[0] <= now - 1.0:
                             request_timestamps.popleft()
-                        if len(request_timestamps) >= config.MAX_REQUESTS_PER_SECOND: # Utiliser config
+                        if len(request_timestamps) >= config.MAX_REQUESTS_PER_SECOND:
                             time_since_oldest_in_window = now - request_timestamps[0]
-                            wait_time = 1.0 - time_since_oldest_in_window + config.MIN_DELAY_BETWEEN_REQUESTS # Utiliser config
+                            wait_time = 1.0 - time_since_oldest_in_window + config.MIN_DELAY_BETWEEN_REQUESTS
                             if wait_time > 0:
                                 print(f"{dt.datetime.now()} - INFO - [Page {page_num}] Rate limiting: sleeping for {wait_time:.2f}s.")
                                 time.sleep(wait_time)
@@ -166,7 +165,7 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
 
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 429:
-                        if attempt >= config.MAX_RETRIES_ON_429: # Utiliser config
+                        if attempt >= config.MAX_RETRIES_ON_429:
                             error_msg = f"Page {page_num}: Échec final après {config.MAX_RETRIES_ON_429 + 1} tentatives (429 Too Many Requests)."
                             print(f"{dt.datetime.now()} - ERROR - [Page {page_num}] {error_msg}")
                             return {"status": "error", "message": error_msg, "results": []}
@@ -177,8 +176,8 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
                             try: wait_duration = float(retry_after_header); header_used = True
                             except ValueError:
                                 try:
-                                    retry_date = datetime.strptime(retry_after_header, '%a, %d %b %Y %H:%M:%S GMT').replace(tzinfo=timezone.utc)
-                                    now_utc = dt.datetime.now(timezone.utc) # Use dt.datetime
+                                    retry_date = dt.datetime.strptime(retry_after_header, '%a, %d %b %Y %H:%M:%S GMT').replace(tzinfo=dt.timezone.utc)
+                                    now_utc = dt.datetime.now(dt.timezone.utc) # Use dt.datetime
                                     wait_duration = (retry_date - now_utc).total_seconds()
                                     if wait_duration < 0: wait_duration = 0
                                     header_used = True
@@ -193,7 +192,7 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
                         print(f"{dt.datetime.now()} - ERROR - [Page {page_num}] {error_msg}")
                         return {"status": "error", "message": error_msg, "results": []}
                 except requests.exceptions.Timeout:
-                    if attempt >= config.MAX_RETRIES_ON_429: # Utiliser config
+                    if attempt >= config.MAX_RETRIES_ON_429:
                          error_msg = f"Page {page_num}: Échec final après {config.MAX_RETRIES_ON_429 + 1} tentatives (Timeout)."
                          print(f"{dt.datetime.now()} - ERROR - [Page {page_num}] {error_msg}")
                          return {"status": "error", "message": error_msg, "results": []}
@@ -256,10 +255,10 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
              discrepancy = total_results - expected_results_approx
              print(f"{dt.datetime.now()} - WARNING - Discrepancy found: {discrepancy} missing results compared to API total.")
              final_message += f" (L'API annonçait {total_results} résultats. {discrepancy} manquant(s), possiblement dû à des erreurs)."
-             status.update(label=f"⚠️ {final_message}", state="complete") # Garder state="complete", ajouter emoji au label
+             status.update(label=f"⚠️ {final_message}", state="complete")
         else:
              total_pages_display = f"sur {total_pages} page{'s' if total_pages > 1 else ''}" if total_pages > 1 else ""
              final_message += f" {total_pages_display}."
-             status.update(label=final_message, state="complete") # État correct ici
+             status.update(label=final_message, state="complete")
 
     return entreprises_detaillees

@@ -2,7 +2,7 @@ import datetime
 import json
 import os
 
-import streamlit as st  # Add this import
+import streamlit as st
 
 # Directory for user-specific ERM data
 USER_DATA_DIR = "user_data"
@@ -14,7 +14,6 @@ def verify_password(plain_password: str, stored_plain_password: str) -> bool:
         f"{datetime.datetime.now()} - INFO - Comparing provided password with stored password."
     )
     # In a real scenario, avoid logging the passwords themselves.
-    # For debugging, we can log lengths or a hash if truly necessary, but problem asks for "indication".
     result = plain_password == stored_plain_password
     print(f"{datetime.datetime.now()} - INFO - Password verification result: {result}")
     return result
@@ -135,4 +134,4 @@ def save_user_erm_data(username: str, data: dict):
         print(
             f"{datetime.datetime.now()} - ERROR - Error saving ERM data for '{username}' to {filepath}: {e}"
         )
-        st.error(f"Failed to save ERM data to {filepath}. Error: {e}")  # Add this line
+        st.error(f"Failed to save ERM data to {filepath}. Error: {e}")

@@ -1,18 +1,15 @@
-# /home/guillaumecayeux/code_dev/recherche_job_candidature_spontanée/data_utils.py
-import datetime as dt  # Aliased for convenience
+import datetime as dt
 from functools import lru_cache
 from io import BytesIO
 
-import numpy as np  # For pd.NA if used
+import numpy as np
 import pandas as pd
 import streamlit as st
-from openpyxl.styles import Alignment, Font, PatternFill  # Added for styling
+from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-# Removed: import openpyxl - pandas uses it via ExcelWriter, direct use not strictly needed if formulas written via pandas/xlsxwriter methods
 from openpyxl.worksheet.datavalidation import DataValidation
 
-# Importer la configuration
 import config
 
 
@@ -114,30 +111,23 @@ naf_detailed_lookup = load_naf_dictionary()
 @lru_cache(maxsize=None)
 def get_section_for_code(code):
     if not code or not isinstance(code, str):
-        # print(f"{dt.datetime.now()} - DEBUG - get_section_for_code: Invalid input code '{code}'. Returning None.")
         return None
     code_cleaned = code.strip().replace(".", "")[:2]
     section = config.NAF_SECTION_MAP.get(code_cleaned)
-    # if not section:
-    #     print(f"{dt.datetime.now()} - DEBUG - get_section_for_code: No section found for code '{code}' (cleaned: '{code_cleaned}').")
     return section
 
 
 @lru_cache(maxsize=None)
 def get_codes_for_section(section_letter):
     if not naf_detailed_lookup:
-        # print(f"{dt.datetime.now()} - DEBUG - get_codes_for_section: NAF dictionary not loaded. Returning empty list for section '{section_letter}'.")
         return []
     if not section_letter:
-        # print(f"{dt.datetime.now()} - DEBUG - get_codes_for_section: Invalid input section_letter '{section_letter}'. Returning empty list.")
         return []
     codes = [
         code
         for code in naf_detailed_lookup
         if get_section_for_code(code) == section_letter
     ]
-    # if not codes:
-    #     print(f"{dt.datetime.now()} - DEBUG - get_codes_for_section: No codes found for section '{section_letter}'.")
     return sorted(codes)
 
 
@@ -327,7 +317,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
     output = BytesIO()
     try:
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            workbook = writer.book  # Get the openpyxl workbook object
+            workbook = writer.book
             print(
                 f"{dt.datetime.now()} - INFO - ExcelWriter created, workbook obtained."
             )
@@ -356,9 +346,9 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 if col in df_entreprises_input.columns:
                     df_data_import[col] = df_entreprises_input[col]
                 else:
-                    df_data_import[col] = np.nan  # Use np.nan for missing columns
+                    df_data_import[col] = np.nan
 
-            df_data_import = df_data_import[data_import_cols]  # Ensure correct order
+            df_data_import = df_data_import[data_import_cols]
             df_data_import.to_excel(
                 writer, sheet_name="DATA_IMPORT", index=False, freeze_panes=(1, 0)
             )
@@ -387,7 +377,6 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "Année Finances Entreprise",
                 "SIREN",
             ]
-            # Create empty DataFrame for headers, formulas will be written by openpyxl
             df_entreprises_sheet_headers_only = pd.DataFrame(
                 columns=entreprises_headers
             )
@@ -395,9 +384,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 writer, sheet_name="ENTREPRISES", index=False, freeze_panes=(1, 0)
             )
 
-            ws_entreprises = workbook[
-                "ENTREPRISES"
-            ]  # Get the sheet after pandas creates it
+            ws_entreprises = workbook["ENTREPRISES"]
 
             # Write formulas row by row
             # Column mapping for ENTREPRISES sheet (1-indexed for openpyxl)
@@ -463,7 +450,6 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "ACTIONS_StatutOpportunuiteTaf",
             ]
 
-            # Use global lists from config.py
             vl_data_from_config = {
                 "CONTACTS_Direction": config.VALEURS_LISTE_CONTACTS_DIRECTION,
                 "ACTIONS_TypeAction": config.VALEURS_LISTE_ACTIONS_TYPEACTION,
@@ -597,22 +583,18 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
             print(f"{dt.datetime.now()} - INFO - Adjusting column widths.")
             for sheet_name in workbook.sheetnames:
                 sheet = workbook[sheet_name]
-                for col_idx, column in enumerate(
-                    sheet.columns
-                ):  # openpyxl columns are 0-indexed here
+                for col_idx, column in enumerate(sheet.columns):
                     max_length = 0
                     column_letter = get_column_letter(col_idx + 1)
 
-                    # Calculate max_length based on header
                     header_cell = sheet.cell(row=1, column=col_idx + 1)
                     if header_cell.value:
                         max_length = len(str(header_cell.value))
 
-                    # For DATA_IMPORT and VALEURS_LISTE, check cell content
                     if sheet_name in ["DATA_IMPORT", "VALEURS_LISTE"]:
                         for i, cell in enumerate(column):
                             if i == 0:
-                                continue  # Skip header already processed
+                                continue
                             try:
                                 if cell.value:
                                     cell_len = len(str(cell.value))
@@ -620,34 +602,22 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                                         max_length = cell_len
                             except:
                                 pass
-                    # For ENTREPRISES, special handling for formula columns if needed (crude estimate)
                     elif sheet_name == "ENTREPRISES":
-                        # Columns F and G are HYPERLINK formulas
-                        if col_idx + 1 == 6 or col_idx + 1 == 7:  # F or G
-                            max_length = max(
-                                max_length, 30
-                            )  # Estimate for hyperlink text
-                        else:  # For other formula columns, iterate a few rows if populated
-                            for i in range(
-                                min(5, num_data_rows)
-                            ):  # Check first 5 data rows
-                                cell_value_formula = sheet.cell(
-                                    row=i + 2, column=col_idx + 1
-                                ).value
-                                if cell_value_formula:  # This is the formula string
-                                    # Crude: if it's a DATA_IMPORT reference, could try to get corresponding data width
-                                    # For now, header width is the main driver for formula columns other than hyperlinks
+                        if col_idx + 1 == 6 or col_idx + 1 == 7:
+                            max_length = max(max_length, 30)
+                        else:
+                            for i in range(min(5, num_data_rows)):
+                                cell_value_formula = sheet.cell(row=i + 2, column=col_idx + 1).value
+                                if cell_value_formula:
                                     pass
 
                     adjusted_width = (max_length + 2) * 1.2
-                    adjusted_width = min(adjusted_width, 60)  # Cap max width
+                    adjusted_width = min(adjusted_width, 60)
                     sheet.column_dimensions[column_letter].width = adjusted_width
 
             # 8. Styling Headers
-            header_font = Font(bold=True, color="FFFFFFFF")  # White
-            header_fill = PatternFill(
-                start_color="FF4472C4", end_color="FF4472C4", fill_type="solid"
-            )  # Medium Blue
+            header_font = Font(bold=True, color="FFFFFFFF")
+            header_fill = PatternFill(start_color="FF4472C4", end_color="FF4472C4", fill_type="solid")
             header_alignment = Alignment(horizontal="center", vertical="center")
 
             sheets_to_style_headers = [
@@ -659,7 +629,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
             for sheet_name in sheets_to_style_headers:
                 if sheet_name in workbook.sheetnames:
                     sheet = workbook[sheet_name]
-                    for cell in sheet[1]:  # Iterate through cells in the first row
+                    for cell in sheet[1]:
                         cell.font = header_font
                         cell.fill = header_fill
                         cell.alignment = header_alignment
@@ -701,7 +671,6 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
             workbook._sheets = final_ordered_sheets
             print(f"{dt.datetime.now()} - INFO - Sheet order set.")
 
-        # End of `with pd.ExcelWriter` block, writer is saved here.
         print(
             f"{dt.datetime.now()} - INFO - Excel file generation complete. Returning output."
         )
@@ -712,7 +681,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
         )
         import traceback
 
-        st.error(traceback.format_exc())  # For more detailed debugging
+        st.error(traceback.format_exc())
         return None
 
     output.seek(0)
@@ -750,9 +719,6 @@ def generate_user_erm_excel(
                 "Nom complet",
                 "Enseignes",
                 "Activité NAF/APE Etablissement",
-                # 'code_naf_etablissement', # Assuming this is not directly in df_entreprises, but derived if needed
-                # 'Activité NAF/APE Entreprise', # Assuming this is not directly in df_entreprises
-                # 'code_naf_entreprise', # Assuming this is not directly in df_entreprises
                 "Adresse établissement",
                 "Nb salariés établissement",
                 "Est siège social",
@@ -767,9 +733,9 @@ def generate_user_erm_excel(
                 if col in df_entreprises.columns:
                     df_data_import[col] = df_entreprises[col]
                 else:
-                    df_data_import[col] = pd.NA  # Use pd.NA for missing columns
+                    df_data_import[col] = pd.NA
 
-            df_data_import = df_data_import[data_import_cols]  # Ensure correct order
+            df_data_import = df_data_import[data_import_cols]
             df_data_import.to_excel(
                 writer, sheet_name="DATA_IMPORT", index=False, freeze_panes=(1, 0)
             )
@@ -830,7 +796,6 @@ def generate_user_erm_excel(
                 "Notes Personnelles",
                 "Statut Piste",
             ]
-            # Add any columns that might be in df_entreprises_sheet but not in the defined order (e.g., old columns)
             for col in df_entreprises_sheet.columns:
                 if col not in entreprises_sheet_cols_ordered:
                     entreprises_sheet_cols_ordered.append(col)
@@ -868,7 +833,6 @@ def generate_user_erm_excel(
 
             # 4. CONTACTS Sheet (direct from user's df_contacts)
             df_contacts_sheet = df_contacts.copy()
-            # Ensure all expected columns are present
             expected_contact_cols = [
                 "Prénom Nom",
                 "Entreprise",
@@ -1004,7 +968,7 @@ def generate_user_erm_excel(
                     # Cell content length (check first N rows for performance)
                     for i, cell in enumerate(column_cells):
                         if i > 100:
-                            break  # Limit rows checked for performance
+                            break
                         try:
                             if cell.value:
                                 cell_len = len(str(cell.value))
@@ -1056,7 +1020,7 @@ def generate_user_erm_excel(
             for title in current_sheet_titles:
                 if (
                     title not in desired_visible_order
-                ):  # Add remaining sheets (like DATA_IMPORT)
+                ):
                     final_ordered_sheets.append(workbook[title])
             workbook._sheets = final_ordered_sheets
             print(f"{dt.datetime.now()} - INFO - Sheet order set for user ERM export.")
@@ -1065,8 +1029,6 @@ def generate_user_erm_excel(
         print(
             f"{dt.datetime.now()} - ERROR - Exception during user ERM Excel generation: {e}"
         )
-        # Consider logging the error or using st.error if this can be called from Streamlit context directly
-        # print(f"Error generating user ERM Excel: {e}") # Basic print for now
         import traceback
 
         print(traceback.format_exc())
@@ -1100,9 +1062,7 @@ def add_entreprise_records(
     current_df_processed = current_df_entreprises.copy()
     for col in expected_cols:
         if col not in current_df_processed.columns:
-            current_df_processed[col] = (
-                pd.NA
-            )  # Use pd.NA for missing values, pandas will handle dtype
+            current_df_processed[col] = pd.NA
     current_df_processed = current_df_processed.reindex(columns=expected_cols)
 
     # Ensure new_records_df has the expected schema
@@ -1139,18 +1099,11 @@ def add_entreprise_records(
             f"{dt.datetime.now()} - INFO - Shape after dropping duplicates on SIRET: {combined_df.shape}"
         )
 
-    # Ensure final schema again, mainly for column order and if combined_df became unexpectedly empty
-    # or if drop_duplicates removed all rows.
     combined_df = combined_df.reindex(columns=expected_cols)
     print(
         f"{dt.datetime.now()} - INFO - add_entreprise_records finished. Final shape: {combined_df.shape}"
     )
     return combined_df
-
-
-# Add this function to data_utils.py
-# Ensure pandas as pd and numpy as np (for pd.NA) are imported if not already.
-# numpy might not be needed if pd.NA is used directly and pandas version is appropriate.
 
 
 def ensure_df_schema(df: pd.DataFrame, expected_cols: list) -> pd.DataFrame:
@@ -1165,7 +1118,7 @@ def ensure_df_schema(df: pd.DataFrame, expected_cols: list) -> pd.DataFrame:
     added_cols = []
     for col in expected_cols:
         if col not in df_processed.columns:
-            df_processed[col] = pd.NA  # Use pd.NA for missing values
+            df_processed[col] = pd.NA
             added_cols.append(col)
     if added_cols:
         print(
@@ -1193,7 +1146,6 @@ def get_erm_data_for_saving() -> dict:
     # Ensure DataFrames exist in session_state and have a default schema if empty
     # This part relies on the main app ensuring df_entreprises, df_contacts, df_actions exist
     # and preferably have their schemas (expected_cols) applied.
-    # For safety, we can try to retrieve them or default to empty DataFrames.
 
     df_e = st.session_state.get("df_entreprises", pd.DataFrame())
     df_c = st.session_state.get("df_contacts", pd.DataFrame())

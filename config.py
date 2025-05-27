@@ -9,26 +9,6 @@ API_BASE_URL = "https://recherche-entreprises.api.gouv.fr"
 NAF_FILE_PATH = "NAF.csv"
 
 # --- Dictionnaires NAF ---
-naf_sections = {
-    "A": "A - Agriculture, sylviculture et pêche",
-    "B": "B - Industries extractives",
-    "C": "C - Industrie manufacturière",
-    "D": "D - Production et distribution d'électricité, gaz, vapeur/eau chaude, air conditionné ",
-    "E": "E - Production et distribution d'eau ; assainissement, gestion des déchets et dépollution",
-    "F": "F - Construction",
-    "G": "G - Commerce de gros et de détail ; réparation d'automobiles et de motocycles",
-    "H": "H - Transports et entreposage",
-    "I": "I - Hébergement et restauration",
-    "J": "J - Information et communication",
-    "K": "K - Activités financières et d'assurance",
-    "L": "L - Activités immobilières",
-    "M": "M - Activités spécialisées, scientifiques et techniques",
-    "N": "N - Activités de services administratifs et de soutien aux activités générales des entreprises",
-    "Q": "Q - Santé humaine et action sociale",
-    "R": "R - Arts, spectacles et activités récréatives",
-    # Note: Sections O, P, S, T, U existent mais sont moins courantes pour ces recherches
-}
-
 NAF_SECTION_MAP = {
     "01": "A",
     "02": "A",
@@ -140,33 +120,30 @@ effectifs_tranches = {
     "53": "10 000 salariés et plus",
 }
 
-# Remplacez votre ancien dictionnaire naf_sections par celui-ci :
 naf_sections_details = {
     "A": {"description": "Agriculture, sylviculture et pêche", "icon": "🚜"},
     "B": {"description": "Industries extractives", "icon": "⛏️"},
     "C": {"description": "Industrie manufacturière", "icon": "🏭"},
-    "D": {"description": "Production et distribution d'électricité, de gaz, de vapeur et d'air conditionné", "icon": "💡"},
-    "E": {"description": "Production et distribution d'eau ; assainissement, gestion des déchets et dépollution", "icon": "💧"},
+    "D": {"description": "Electricité, gaz, vapeur et air conditionné ", "icon": "💡"},
+    "E": {"description": "Eau, assainissement, gestion déchets, dépollution", "icon": "💧"},
     "F": {"description": "Construction", "icon": "🏗️"},
-    "G": {"description": "Commerce ; réparation d'automobiles et de motocycles", "icon": "🛒"},
+    "G": {"description": "Commerce ; réparation auto / moto", "icon": "🛒"},
     "H": {"description": "Transports et entreposage", "icon": "🚚"},
     "I": {"description": "Hébergement et restauration", "icon": "🏨"},
     "J": {"description": "Information et communication", "icon": "💻"},
     "K": {"description": "Activités financières et d'assurance", "icon": "💰"},
     "L": {"description": "Activités immobilières", "icon": "🏘️"},
     "M": {"description": "Activités spécialisées, scientifiques et techniques", "icon": "🔬"},
-    "N": {"description": "Activités de services administratifs et de soutien", "icon": "👥"},
-    "O": {"description": "Administration publique", "icon": "🏛️"}, # (Généralement non pertinent pour la recherche d'emploi privé)
+    "N": {"description": "Services administratifs et de soutien", "icon": "👥"},
+    # "O": {"description": "Administration publique", "icon": "🏛️"}, 
     "P": {"description": "Enseignement", "icon": "🎓"},
     "Q": {"description": "Santé humaine et action sociale", "icon": "❤️"},
     "R": {"description": "Arts, spectacles et activités récréatives", "icon": "🎭"},
     "S": {"description": "Autres activités de services", "icon": "🛠️"},
-    "T": {"description": "Activités des ménages en tant qu'employeurs ; activités indifférenciées des ménages en tant que producteurs de biens et services pour usage propre", "icon": "🏠"}, # (Peu pertinent)
-    "U": {"description": "Activités extra-territoriales", "icon": "🌍"} # (Peu pertinent)
+    # "T": {"description": "Activités des ménages (employeurs ou producteurs de biens et services pour usage propre", "icon": "🏠"}, 
+    # "U": {"description": "Activités extra-territoriales", "icon": "🌍"} #
 }
 
-# Assurez-vous que les autres configurations (effectifs_groupes, naf_color_mapping, etc.) restent présentes.
-# Par exemple :
 effectifs_groupes = {
     "0 salarié": ["00"],
     "1 à 9 salariés": ["01", "02", "03"],
@@ -273,8 +250,6 @@ COLS_EXPORT_ORDER = [
     "Latitude",
     "Longitude",
     "Section NAF",  # Section NAF est basé sur code_naf_etablissement
-    # 'Color', 'Radius' # Color and Radius are primarily for map display, maybe not essential in general export
-    # Decided to keep Color and Radius for now as they were in the original list.
     "Color",
     "Radius",
 ]
@@ -316,15 +291,13 @@ VALEURS_LISTE_ACTIONS_STATUTACTION = [
 VALEURS_LISTE_ACTIONS_STATUTOPPORTUNITE = [
     "Ciblée",
     "En veille",
-    "Ciblée",
     "Postulée",
-    "Abandonnée",  # Note: "Ciblée" is duplicated
+    "Abandonnée",
     "Refusée",
     "Offre reçue",
     "Acceptée",
 ]
 
-# Dans config.py
 VALEURS_LISTE_ENTREPRISE_STATUTPISTE = [
     "À contacter",
     "Contacté",
@@ -333,6 +306,5 @@ VALEURS_LISTE_ENTREPRISE_STATUTPISTE = [
     "Stand-by",
     "Non intéressé",
     "Contrat signé",
-    # Ajoutez d'autres statuts si nécessaire
 ]
 
