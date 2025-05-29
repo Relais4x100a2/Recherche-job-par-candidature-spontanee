@@ -493,21 +493,48 @@ if lancer_recherche:
             st.stop()
         lat_centre, lon_centre = coordonnees
 
-        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Calling API client.")
+        # Get POSTAL codes in radius
+        st.write(f"Recherche des codes postaux dans un rayon de {radius_input:.1f} km autour de l'adresse...")
+        postal_codes_in_radius = geo_utils.get_communes_in_radius_cached(lat_centre, lon_centre, radius_input) # This now returns postal codes
+        print(f"{datetime.datetime.now()} - DEBUG - Postal codes in radius: {postal_codes_in_radius}")
+        
+        if not postal_codes_in_radius:
+            st.warning(f"Aucun code postal trouvé pour les communes dans un rayon de {radius_input:.1f} km autour de l'adresse spécifiée. Essayez un rayon plus large ou une autre adresse.")
+            st.stop()
+        
+        st.write(f"{len(postal_codes_in_radius)} codes postaux trouvés dans le rayon. Lancement de la recherche d'entreprises pour ces codes postaux...")
+
+        # Prepare API params for the client function
+        # `final_api_params` currently holds NAF criteria. Add effectifs.
+        if st.session_state.selected_effectifs_codes:
+            final_api_params["tranche_effectif_salarie"] = ",".join(st.session_state.selected_effectifs_codes)
+        else:
+            # This should have been caught earlier by the UI check, but as a safeguard:
+            st.error("⚠️ Aucune tranche d'effectifs sélectionnée.") 
+            st.stop()
+
+        print(f"{datetime.datetime.now()} - DEBUG - Calling API client with postal_codes: {postal_codes_in_radius}, api_params: {final_api_params}")
         # 2. Lancer la recherche API
         # The api_client function will use st.status internally
-        api_response = api_client.rechercher_geographiquement_entreprises(
-            lat_centre, lon_centre, radius_input, final_api_params, force_full_fetch=False
+        api_response = api_client.rechercher_entreprises_par_localisation_et_criteres(
+            postal_codes_in_radius,
+            final_api_params, # Contains NAF and effectifs
+            force_full_fetch=False,
+            code_type="postal"
         )
 
         if isinstance(api_response, dict) and api_response.get("status_code") == "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN":
             # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: API response needs user confirmation/breakdown.")
             st.session_state.original_search_context_for_breakdown = {
-                "lat": lat_centre, "lon": lon_centre, "radius": radius_input,
-                "page1_results": api_response["page1_results"],
-                "total_pages_estimated": api_response["total_pages_estimated"],
-                "total_results_estimated": api_response["total_results_estimated"],
-                "original_query_params": api_response["original_query_params"] # Full params from API client
+                "localisation_codes": postal_codes_in_radius, # List of all postal codes for the search area
+                "code_type": "postal", # Store the type of code used
+                "page1_results": api_response["page1_results"], # Results from the first batch of communes
+                "total_pages_estimated": api_response["total_pages_estimated"], # Estimation for that first batch
+                "total_results_estimated": api_response["total_results_estimated"], # Estimation for that first batch
+                "original_query_params": api_response["original_query_params"], # Params used for that first batch (includes NAF, effectifs, and its specific commune codes)
+                "user_address": adresse_input, # Store original user inputs for context
+                "user_radius": radius_input,
+                "user_lat_lon": (lat_centre, lon_centre)
             }
             st.session_state.show_breakdown_options = True
             st.rerun() # Rerun to show breakdown options UI
@@ -515,7 +542,7 @@ if lancer_recherche:
         elif isinstance(api_response, list): # Normal successful search (not too large, or already processed)
             # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: API response is a list (normal search).")
             entreprises_trouvees_list = api_response # Renamed to avoid conflict
-            df_resultats = data_utils.traitement_reponse_api(
+            df_resultats = data_utils.traitement_reponse_api( # This function filters by effectifs again, which is fine as a safeguard
                 entreprises_trouvees_list, st.session_state.selected_effectifs_codes
             )
 
@@ -597,7 +624,7 @@ if st.session_state.get("show_breakdown_options", False):
                 # User can now change inputs and click the main "🚀 Rechercher" button again.
                 st.rerun()
         with col2_breakdown:
-            if st.button("⚙️ Lancer la recherche décomposée", type="warning", key="proceed_breakdown_btn", use_container_width=True):
+            if st.button("⚙️ Lancer la recherche décomposée", type="secondary", key="proceed_breakdown_btn", use_container_width=True):
                 st.session_state.show_breakdown_options = False
                 st.session_state.breakdown_search_pending = True
                 st.rerun()
@@ -605,13 +632,16 @@ if st.session_state.get("show_breakdown_options", False):
 # --- LOGIC FOR PERFORMING THE BREAKDOWN SEARCH ---
 if st.session_state.get("breakdown_search_pending", False):
     context = st.session_state.original_search_context_for_breakdown
-    lat_c, lon_c, rad = context["lat"], context["lon"], context["radius"]
-    # original_api_params_for_breakdown is the full `base_params` from the first call in api_client
-    # It includes geo, per_page, minimal, include, limite_matching_etablissements, AND the NAF params.
-    original_api_params_for_breakdown = context["original_query_params"]
+    
+    # These are from the *first batch* of the initial call if it triggered breakdown
+    # `original_query_params_from_first_batch` contains NAF, effectifs, and the first batch of commune codes.
+    original_query_params_from_first_batch = context["original_query_params"] 
+    
+    # The list of ALL localisation codes (postal codes in this case) for the breakdown search
+    localisation_codes_for_breakdown = context["localisation_codes"]
+    code_type_for_breakdown = context["code_type"]
 
     all_breakdown_results_list = []
-    processed_sirets_in_breakdown = set()
 
     # Add page 1 results from the initial broad query
     if context["page1_results"]:
@@ -619,33 +649,24 @@ if st.session_state.get("breakdown_search_pending", False):
         for company_item_initial_p1 in context["page1_results"]:
             siren_company_initial_p1 = company_item_initial_p1.get("siren")
             company_had_new_etab_initial_p1 = False
-            if company_item_initial_p1.get("matching_etablissements"):
-                for etab_item_initial_p1 in company_item_initial_p1["matching_etablissements"]:
-                    siret_etab_initial_p1 = etab_item_initial_p1.get("siret")
-                    if siret_etab_initial_p1 and siret_etab_initial_p1 not in processed_sirets_in_breakdown:
-                        processed_sirets_in_breakdown.add(siret_etab_initial_p1)
-                        company_had_new_etab_initial_p1 = True
-            
-            if company_had_new_etab_initial_p1:
-                if siren_company_initial_p1 not in sirens_of_companies_added_from_initial_page1: # Avoid adding same company obj multiple times from this batch
-                    all_breakdown_results_list.append(company_item_initial_p1)
-                    if siren_company_initial_p1:
-                         sirens_of_companies_added_from_initial_page1.add(siren_company_initial_p1)
-    print(f"{datetime.datetime.now()} - DEBUG - Breakdown: Initial processed_sirets_in_breakdown (after page 1 of broad query): {len(processed_sirets_in_breakdown)} SIRETs. Example: {list(processed_sirets_in_breakdown)[:5]}")
+            # Simplified: just add the company object. Deduplication by SIREN will happen at the end.
+            all_breakdown_results_list.append(company_item_initial_p1)
+    # print(f"{datetime.datetime.now()} - DEBUG - Breakdown: Added {len(context.get('page1_results', []))} results from initial page 1 of first batch.")
     
+    # Determine NAF criteria to iterate for breakdown (same as before, but based on params of the first batch)
     naf_criteria_to_iterate = []
     naf_param_key_used = None
-    naf_values_string = None
+    naf_values_string_original = None
 
-    if "section_activite_principale" in original_api_params_for_breakdown:
+    if "section_activite_principale" in original_query_params_from_first_batch:
         naf_param_key_used = "section_activite_principale"
-        naf_values_string = original_api_params_for_breakdown[naf_param_key_used]
-    elif "activite_principale" in original_api_params_for_breakdown:
+        naf_values_string_original = original_query_params_from_first_batch[naf_param_key_used]
+    elif "activite_principale" in original_query_params_from_first_batch:
         naf_param_key_used = "activite_principale"
-        naf_values_string = original_api_params_for_breakdown[naf_param_key_used]
+        naf_values_string_original = original_query_params_from_first_batch[naf_param_key_used]
 
-    if naf_param_key_used and naf_values_string:
-        individual_naf_values = naf_values_string.split(',')
+    if naf_param_key_used and naf_values_string_original:
+        individual_naf_values = naf_values_string_original.split(',')
         if len(individual_naf_values) > 1:
             for val in individual_naf_values:
                 naf_criteria_to_iterate.append({naf_param_key_used: val.strip()})
@@ -657,7 +678,7 @@ if st.session_state.get("breakdown_search_pending", False):
         naf_criteria_to_iterate.append({}) 
 
     with results_container: # Display progress within the results container
-        st.info(f"Lancement de la recherche décomposée en {len(naf_criteria_to_iterate)} sous-ensemble(s)...")
+        st.info(f"Lancement de la recherche décomposée par critère NAF sur {len(localisation_codes_for_breakdown)} codes {code_type_for_breakdown} ({len(naf_criteria_to_iterate)} sous-ensemble(s) NAF)...")
         
         # Clear rate limit timestamps once before the batch of breakdown calls
         with api_client.rate_limit_lock:
@@ -665,172 +686,87 @@ if st.session_state.get("breakdown_search_pending", False):
             # print(f"{datetime.datetime.now()} - DEBUG - Request timestamps deque cleared for breakdown search batch.")
 
         for i, naf_criterion_map_for_subset in enumerate(naf_criteria_to_iterate):
-            # This will hold the NAF-specific part of the parameters for the API client
+            # Params for this NAF subset, to be applied to ALL communes
             current_subset_api_params_for_client = {
-                # k: v for k, v in original_api_params_for_breakdown.items()
-                # if k not in ["lat", "long", "radius", "per_page", "minimal", "include", "limite_matching_etablissements", "page", "activite_principale", "section_activite_principale"]
+                # Copy effectifs from original params (of the first batch)
+                k: v for k, v in original_query_params_from_first_batch.items() if k == "tranche_effectif_salarie"
             }
-            # The NAF part (activite_principale or section_activite_principale)
-            # is passed as `api_params_from_app` to the API client.
-            # The geo and other fixed params are added inside the API client.
-            # So, `current_subset_api_params_for_client` should ONLY contain the NAF part for this sub-query.
             
-            # If naf_criterion_map_for_subset is empty (e.g. no NAFs to iterate or original had no NAF),
-            # then we need to pass the original NAF parameters if they existed.
-            if not naf_criterion_map_for_subset: # This means we are processing the "original" criteria as one block
-                if "activite_principale" in original_api_params_for_breakdown:
-                    current_subset_api_params_for_client["activite_principale"] = original_api_params_for_breakdown["activite_principale"]
-                if "section_activite_principale" in original_api_params_for_breakdown:
-                     current_subset_api_params_for_client["section_activite_principale"] = original_api_params_for_breakdown["section_activite_principale"]
-            else: # We are iterating specific NAF criteria
+            if not naf_criterion_map_for_subset: # Original NAF criteria (could be empty if no NAF was set)
+                if "activite_principale" in original_query_params_from_first_batch:
+                    current_subset_api_params_for_client["activite_principale"] = original_query_params_from_first_batch["activite_principale"]
+                if "section_activite_principale" in original_query_params_from_first_batch:
+                     current_subset_api_params_for_client["section_activite_principale"] = original_query_params_from_first_batch["section_activite_principale"]
+            else: # Specific NAF criterion for this iteration
                 current_subset_api_params_for_client.update(naf_criterion_map_for_subset)
 
 
-            desc_critere = ", ".join([f"{k}={v}" for k,v in current_subset_api_params_for_client.items()]) if current_subset_api_params_for_client else "critères originaux (sans décomposition NAF)"
-            st.markdown(f"--- \n**Sous-recherche {i+1}/{len(naf_criteria_to_iterate)} : {desc_critere}**")
-            print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 Sub-search {i+1}/{len(naf_criteria_to_iterate)} for: {desc_critere}. Current total unique SIRETs: {len(processed_sirets_in_breakdown)}")
+            desc_critere_naf = ", ".join([f"{k}={v}" for k,v in current_subset_api_params_for_client.items() if k.startswith("activite") or k.startswith("section")])
+            if not desc_critere_naf: desc_critere_naf = "tous NAF sélectionnés initialement"
+            st.markdown(f"--- \n**Sous-recherche NAF {i+1}/{len(naf_criteria_to_iterate)} : {desc_critere_naf}** (sur tous les codes {code_type_for_breakdown})")
+            # print(f"{datetime.datetime.now()} - DEBUG - Breakdown by NAF: {desc_critere_naf}")
             # print(f"{datetime.datetime.now()} - DEBUG - Breakdown sub-search {i+1}: Params for API client: {current_subset_api_params_for_client}")
             
-            subset_results_list = api_client.rechercher_geographiquement_entreprises(
-                lat_c, lon_c, rad,
-                current_subset_api_params_for_client, # This is the `api_params_from_app` argument
-                force_full_fetch=True
+            # This call will iterate through localisation_codes_for_breakdown in batches internally
+            subset_results_list = api_client.rechercher_entreprises_par_localisation_et_criteres(
+                localisation_codes_for_breakdown,
+                current_subset_api_params_for_client, # NAF + effectifs for this NAF subset
+                force_full_fetch=True,
+                code_type=code_type_for_breakdown
             )
 
-            processed_subset_as_list = False # Flag to indicate if we handled this subset as a list
-            # Check if this sub-query (especially if it was for a whole section) itself needs further breakdown
-            if isinstance(subset_results_list, dict) and \
-               subset_results_list.get("status_code") == "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN" and \
-               "section_activite_principale" in current_subset_api_params_for_client:
-                
-                section_to_sub_breakdown = current_subset_api_params_for_client["section_activite_principale"]
-                st.warning(f"La sous-recherche pour la section {section_to_sub_breakdown} est encore trop large. Décomposition par code NAF spécifique au sein de cette section...")
-                print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere} needs L2 breakdown. API reported {subset_results_list.get('total_results_estimated')} results.")
-
-                # Add page 1 results from this intermediate broad section query
-                page1_results_from_section_query = subset_results_list.get("page1_results")
-                if page1_results_from_section_query: # This is a list of "entreprise" objects
-                    sirets_added_from_section_page1 = 0
-                    sirens_of_companies_added_from_section_p1 = set()
-                    for company_item_section_p1 in page1_results_from_section_query:
-                        siren_company_section_p1 = company_item_section_p1.get("siren")
-                        company_had_new_etab_section_p1 = False
-                        if company_item_section_p1.get("matching_etablissements"):
-                            for etab_item_section_p1 in company_item_section_p1["matching_etablissements"]:
-                                siret_etab_section_p1 = etab_item_section_p1.get("siret")
-                                if siret_etab_section_p1 and siret_etab_section_p1 not in processed_sirets_in_breakdown:
-                                    processed_sirets_in_breakdown.add(siret_etab_section_p1)
-                                    sirets_added_from_section_page1 += 1 # Count new SIRETs
-                                    company_had_new_etab_section_p1 = True
-                        if company_had_new_etab_section_p1 and siren_company_section_p1 not in sirens_of_companies_added_from_section_p1:
-                            all_breakdown_results_list.append(company_item_section_p1)
-                            if siren_company_section_p1: sirens_of_companies_added_from_section_p1.add(siren_company_section_p1)
-                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L2: Added {sirets_added_from_section_page1} new SIRETs from page 1 of section '{section_to_sub_breakdown}'. Total unique SIRETs now: {len(processed_sirets_in_breakdown)}")
-
-                specific_codes_in_section = data_utils.get_codes_for_section(section_to_sub_breakdown)
-                if not specific_codes_in_section:
-                    st.error(f"Aucun code NAF spécifique trouvé pour la section {section_to_sub_breakdown} pour la sous-décomposition.")
-                else:
-                    st.info(f"Décomposition de la section {section_to_sub_breakdown} en {len(specific_codes_in_section)} codes NAF spécifiques...")
-                    for k, specific_code in enumerate(specific_codes_in_section):
-                        specific_code_params = {"activite_principale": specific_code}
-                        st.markdown(f"--- \n**Sous-sous-recherche {k+1}/{len(specific_codes_in_section)} pour Section {section_to_sub_breakdown} : Code {specific_code}**")
-                        print(f"{datetime.datetime.now()} - DEBUG - Breakdown L2 Sub-sub-search {k+1}/{len(specific_codes_in_section)} for section '{section_to_sub_breakdown}', code '{specific_code}'. Current total unique SIRETs: {len(processed_sirets_in_breakdown)}")
-                        # print(f"{datetime.datetime.now()} - DEBUG - Breakdown sub-sub-search: Code {specific_code}, Params: {specific_code_params}")
-                        sub_subset_results = api_client.rechercher_geographiquement_entreprises(
-                            lat_c, lon_c, rad,
-                            specific_code_params,
-                            force_full_fetch=True # We want all results for this specific code
-                        )
-                        if isinstance(sub_subset_results, list): # List of "entreprise" objects
-                            num_results_in_sub_subset_call = len(sub_subset_results)
-                            count_new_for_sub_subset = 0
-                            newly_added_sirets_this_call = []
-                            sirens_of_companies_added_from_sub_subset = set()
-                            for company_item_sub_subset in sub_subset_results:
-                                siren_company_sub_subset = company_item_sub_subset.get("siren")
-                                company_had_new_etab_sub_subset = False
-                                if company_item_sub_subset.get("matching_etablissements"):
-                                    for etab_item_sub_subset in company_item_sub_subset["matching_etablissements"]:
-                                        siret_etab_sub_subset = etab_item_sub_subset.get("siret")
-                                        if siret_etab_sub_subset and siret_etab_sub_subset not in processed_sirets_in_breakdown:
-                                            processed_sirets_in_breakdown.add(siret_etab_sub_subset)
-                                            count_new_for_sub_subset += 1
-                                            newly_added_sirets_this_call.append(siret_etab_sub_subset)
-                                            company_had_new_etab_sub_subset = True
-                                if company_had_new_etab_sub_subset and siren_company_sub_subset not in sirens_of_companies_added_from_sub_subset:
-                                    all_breakdown_results_list.append(company_item_sub_subset)
-                                    if siren_company_sub_subset: sirens_of_companies_added_from_sub_subset.add(siren_company_sub_subset)
-                                    
-                            st.write(f"➡️ {count_new_for_sub_subset} nouveaux résultats uniques ajoutés pour le code {specific_code}.")
-                            print(f"{datetime.datetime.now()} - DEBUG - Breakdown L2 Sub-sub-search for code '{specific_code}': API returned {num_results_in_sub_subset_call} items. Added {count_new_for_sub_subset} new unique SIRETs. Example new: {newly_added_sirets_this_call[:3]}. Total unique SIRETs now: {len(processed_sirets_in_breakdown)}")
-                        elif isinstance(sub_subset_results, dict) and sub_subset_results.get("status_code") == "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN":
-                            print(f"{datetime.datetime.now()} - WARNING - Breakdown L2 Sub-sub-search for code '{specific_code}' STILL too broad: {sub_subset_results.get('total_results_estimated')} results. Page 1 results from this specific code query are being added.")
-                            # Add page 1 from this specific NAF code query if it's still too broad (should be rare but handle)
-                            page1_results_specific_code = sub_subset_results.get("page1_results")
-                            if page1_results_specific_code: # List of "entreprise" objects
-                                sirens_of_companies_added_from_specific_code_p1 = set()
-                                for company_item_specific_code_p1 in page1_results_specific_code:
-                                    siren_company_specific_code_p1 = company_item_specific_code_p1.get("siren")
-                                    company_had_new_etab_specific_code_p1 = False
-                                    if company_item_specific_code_p1.get("matching_etablissements"):
-                                        for etab_item_specific_code_p1 in company_item_specific_code_p1["matching_etablissements"]:
-                                            siret_etab_specific_code_p1 = etab_item_specific_code_p1.get("siret")
-                                            if siret_etab_specific_code_p1 and siret_etab_specific_code_p1 not in processed_sirets_in_breakdown:
-                                                processed_sirets_in_breakdown.add(siret_etab_specific_code_p1)
-                                                company_had_new_etab_specific_code_p1 = True
-                                    if company_had_new_etab_specific_code_p1 and siren_company_specific_code_p1 not in sirens_of_companies_added_from_specific_code_p1:
-                                        all_breakdown_results_list.append(company_item_specific_code_p1)
-                                        if siren_company_specific_code_p1: sirens_of_companies_added_from_specific_code_p1.add(siren_company_specific_code_p1)
-                        elif sub_subset_results is None:
-                             st.error(f"Erreur critique lors de la sous-sous-recherche pour le code {specific_code}.")
-                        # No further breakdown expected for a single specific NAF code query
-            
-            # Standard processing for results if it was a list (i.e., didn't need sub-breakdown, or was a specific NAF code query)
-            elif isinstance(subset_results_list, list): # Note: elif here
-                processed_subset_as_list = True
-                num_results_in_subset_call = len(subset_results_list)
-                count_new_for_subset = 0
-                newly_added_sirets_this_call_l1 = []
-                for item in subset_results_list:
-                    siret = item.get("siret")
-                    if siret and siret not in processed_sirets_in_breakdown:
-                        all_breakdown_results_list.append(item)
-                        processed_sirets_in_breakdown.add(siret)
-                        count_new_for_subset +=1
-                        newly_added_sirets_this_call_l1.append(siret)
-                
-                # Message about results from this specific sub-query
-                if num_results_in_subset_call > 0 and count_new_for_subset == 0:
-                    st.write(f"➡️ {desc_critere}: {num_results_in_subset_call} résultat(s) trouvé(s) par cette sous-recherche, mais tous étaient déjà collectés globalement.")
-                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere}: API returned {num_results_in_subset_call} items. 0 new unique SIRETs added (all duplicates). Total unique SIRETs: {len(processed_sirets_in_breakdown)}")
-                elif count_new_for_subset > 0:
-                    st.write(f"➡️ {count_new_for_subset} nouveaux résultats uniques ajoutés pour {desc_critere}.")
-                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere}: API returned {num_results_in_subset_call} items. Added {count_new_for_subset} new unique SIRETs. Example new: {newly_added_sirets_this_call_l1[:3]}. Total unique SIRETs: {len(processed_sirets_in_breakdown)}")
-                else: # num_results_in_subset_call == 0
-                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere}: API returned 0 items.")
-                # If num_results_in_subset_call is 0, no explicit message here,
-                # as the API client's status would have indicated "Aucun résultat trouvé".
-
-            elif subset_results_list is None: # Critical error from API client
-                st.error(f"Erreur critique lors de la sous-recherche pour {desc_critere}. Vérifiez les messages précédents.")
-                print(f"{datetime.datetime.now()} - ERROR - Breakdown L1 for {desc_critere}: API call failed critically (returned None).")
-            # If subset_results_list was a dict but didn't trigger sub-breakdown (e.g. specific NAF code hitting limit), it's an edge case.
-            # For now, we assume specific NAF codes won't trigger NEEDS_USER_CONFIRMATION_OR_BREAKDOWN,
-            # as there's no further NAF breakdown. If they do, their page1_results are implicitly ignored by this structure.
+            # The `rechercher_entreprises_par_communes_et_criteres` returns a list of "entreprise" objects
+            # or the "NEEDS_BREAKDOWN" dict if the *first batch of its internal commune loop* was too large.
+            # Since `force_full_fetch=True` here, it should always return a list (or None for critical error).
+            if isinstance(subset_results_list, list):
+                all_breakdown_results_list.extend(subset_results_list)
+                # print(f"{datetime.datetime.now()} - DEBUG - Breakdown by NAF: Added {len(subset_results_list)} items from NAF subset {desc_critere_naf}.")
+            elif isinstance(subset_results_list, dict) and subset_results_list.get("status_code") == "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN":
+                # This is an edge case: a NAF-specific query, across multiple communes, where the *first commune batch* was still too large,
+                # even with force_full_fetch=True (which means it hit API_MAX_PAGES for that batch).
+                # We should take its page1_results for this NAF subset.
+                st.warning(f"La sous-recherche NAF {desc_critere_naf} pour le premier lot de communes était encore très volumineuse (même avec force_full_fetch). Seuls les premiers résultats de ce lot sont inclus pour ce critère NAF.")
+                if subset_results_list.get("page1_results"):
+                    all_breakdown_results_list.extend(subset_results_list.get("page1_results"))
+            elif subset_results_list is None: # Critical error from API client for this NAF subset
+                st.error(f"Erreur critique lors de la sous-recherche NAF pour {desc_critere_naf}.")
         
-        st.markdown("--- \n**Fin de la recherche décomposée.**")
+        st.markdown("--- \n**Fin de la recherche décomposée par NAF.**")
         st.session_state.breakdown_search_pending = False
-        print(f"{datetime.datetime.now()} - DEBUG - Breakdown: Completed. Total unique SIRETs collected: {len(processed_sirets_in_breakdown)}. Total items in all_breakdown_results_list: {len(all_breakdown_results_list)}")
+        # print(f"{datetime.datetime.now()} - DEBUG - Breakdown by NAF: Completed. Total items before final deduplication: {len(all_breakdown_results_list)}")
         
         if all_breakdown_results_list:
-            # print(f"{datetime.datetime.now()} - DEBUG - Breakdown search: Processing {len(all_breakdown_results_list)} total raw results.")
+            # Deduplicate `all_breakdown_results_list` by SIREN, merging matching_etablissements
+            unique_entreprises_by_siren_bd = {}
+            for entreprise_obj_bd in all_breakdown_results_list:
+                siren_bd = entreprise_obj_bd.get("siren")
+                if siren_bd:
+                    if siren_bd not in unique_entreprises_by_siren_bd:
+                        entreprise_obj_bd["matching_etablissements"] = entreprise_obj_bd.get("matching_etablissements") or []
+                        unique_entreprises_by_siren_bd[siren_bd] = entreprise_obj_bd
+                    else: # Merge matching_etablissements
+                        existing_etabs_sirets_bd = {
+                            etab_bd.get("siret") for etab_bd in unique_entreprises_by_siren_bd[siren_bd].get("matching_etablissements", []) if etab_bd.get("siret")
+                        }
+                        new_etabs_to_add_bd = [
+                            new_etab_bd for new_etab_bd in entreprise_obj_bd.get("matching_etablissements", [])
+                            if new_etab_bd.get("siret") and new_etab_bd.get("siret") not in existing_etabs_sirets_bd
+                        ]
+                        if new_etabs_to_add_bd:
+                            unique_entreprises_by_siren_bd[siren_bd]["matching_etablissements"].extend(new_etabs_to_add_bd)
+                else: # Should be rare
+                    unique_entreprises_by_siren_bd[f"no_siren_{len(unique_entreprises_by_siren_bd)}"] = entreprise_obj_bd
+            
+            deduplicated_entreprise_list_bd = list(unique_entreprises_by_siren_bd.values())
+            # print(f"{datetime.datetime.now()} - DEBUG - Breakdown by NAF: Deduplicated 'entreprise' items: {len(deduplicated_entreprise_list_bd)}")
+
             df_final_results = data_utils.traitement_reponse_api(
-                all_breakdown_results_list, st.session_state.selected_effectifs_codes
+                deduplicated_entreprise_list_bd, 
+                st.session_state.selected_effectifs_codes # This is now mostly for data transformation, not primary filtering
             )
             st.session_state.df_search_results = df_final_results.copy() if not df_final_results.empty else pd.DataFrame()
-            st.session_state.search_coordinates = (lat_c, lon_c)
-            st.session_state.search_radius = rad
+            st.session_state.search_coordinates = context.get("user_lat_lon") # Original center for map
+            st.session_state.search_radius = context.get("user_radius") # Original radius for map context
             
             # Add new results from breakdown to ERM
             if not df_final_results.empty:
@@ -1110,7 +1046,7 @@ try:
 except Exception as e:
     st.error(f"Erreur lors de la préparation du téléchargement ERM : {e}")
 st.markdown("---")
-st.markdown(" Propulsé avec les API Data Gouv : [API Recherche d’Entreprises](https://www.data.gouv.fr/fr/dataservices/api-recherche-dentreprises/) & [API BAN France](https://www.data.gouv.fr/fr/dataservices/api-adresse-base-adresse-nationale-ban/)")
+st.markdown(" Propulsé avec les API Data Gouv : [API Recherche d’Entreprises](https://www.data.gouv.fr/fr/dataservices/api-recherche-dentreprises/), [API Découpage administratif](https://guides.data.gouv.fr/reutiliser-des-donnees/utiliser-les-api-geographiques/utiliser-lapi-decoupage-administratif) & [API Adresse](https://www.data.gouv.fr/fr/dataservices/api-adresse-base-adresse-nationale-ban/)")
 st.markdown("---")
 # --- Bouton pour effacer le tableau des établissements ---
 if not st.session_state.df_entreprises_erm.empty:
