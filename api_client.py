@@ -63,33 +63,40 @@ def fetch_first_page(url, params, headers):
         # print(f"{dt.datetime.now()} - ERROR - First page fetch RequestException: {error_msg}")
         return {"success": False, "error_message": error_msg}
 
-def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
+def rechercher_geographiquement_entreprises(lat, long, radius, api_params_from_app, force_full_fetch=False):
     """
     Recherche les entreprises via l'API en utilisant les paramètres fournis.
     Parallélise les appels après la première page, respecte le rate limit et gère les erreurs 429.
+    Si la recherche initiale est trop large (atteint config.API_MAX_PAGES) et force_full_fetch est False,
+    retourne un statut spécial pour que l'application principale gère la suite (ex: proposer un affinage ou une recherche décomposée).
+    Si force_full_fetch est True, tente de récupérer toutes les pages jusqu'à config.API_MAX_PAGES.
     """
-    # print(f"{dt.datetime.now()} - DEBUG - rechercher_geographiquement_entreprises called with lat={lat}, long={long}, radius={radius}, api_params={api_params}")
+    # print(f"{dt.datetime.now()} - DEBUG - rechercher_geographiquement_entreprises called with lat={lat}, long={long}, radius={radius}, api_params_from_app={api_params_from_app}, force_full_fetch={force_full_fetch}")
     url = f"{config.API_BASE_URL}/near_point"
-    base_params = api_params.copy()
+    base_params = api_params_from_app.copy() # NAF params etc. from app
     base_params.update({
         'lat': lat,
         'long': long,
         'radius': radius,
         'per_page': 25,
+        'minimal': 'true', # Added: Request minimal response
+        'include': 'matching_etablissements,finances', # Added: Include specific data
+        'limite_matching_etablissements': 100 # Added: Limit matching establishments
+
     })
     headers = {'accept': 'application/json'}
     entreprises_detaillees = []
     total_pages = 1
     total_results = 0
 
-    # Clear the request timestamps deque at the beginning of each new search
-    # to reset rate limiting state for this specific search operation.
-    with rate_limit_lock:
-        request_timestamps.clear()
-        # print(f"{dt.datetime.now()} - DEBUG - Request timestamps deque cleared.")
+    # Clear the request timestamps deque only for a new, non-forced search operation.
+    # For breakdown calls (force_full_fetch=True), app.py should manage clearing it once before the batch.
+    if not force_full_fetch:
+        with rate_limit_lock:
+            request_timestamps.clear()
+            # print(f"{dt.datetime.now()} - DEBUG - Request timestamps deque cleared for new search.")
 
-    search_type = "codes NAF spécifiques"
-    initial_status_message = f"Initialisation de la recherche ({search_type}) autour de ({lat:.4f}, {long:.4f})..."
+    initial_status_message = f"Initialisation de la recherche d'entreprises autour de ({lat:.4f}, {long:.4f})..."
     with st.status(initial_status_message, expanded=True) as status:
 
         # === Étape 1: Récupérer la première page ===
@@ -112,34 +119,43 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
              status.update(label=f"Aucun résultat trouvé pour les critères spécifiés.", state="complete")
              return []
 
-        entreprises_detaillees.extend(results_page1)
+        # results_page1 are added to entreprises_detaillees below, only if not returning early.
         elapsed_time_page1 = time.time() - start_time_page1
         # print(f"{dt.datetime.now()} - DEBUG - Page 1 fetch completed in {elapsed_time_page1:.2f}s. Results: {len(results_page1)}, Est. Total Pages: {total_pages}, Est. Total Results: {total_results}")
         st.write(f"Page 1 ({len(results_page1)} rés.) récupérée en {elapsed_time_page1:.2f}s. Total pages estimé: {total_pages}, Total résultats API: {total_results}")
 
-        if total_pages >= 400 and total_results >= 10000:
-            # print(f"{dt.datetime.now()} - WARNING - Large number of results: {total_results} results over {total_pages} pages.")
-            # Warn user about a very large result set, suggesting refinement.
-            st.warning(
-                f"⚠️ Votre recherche a retourné un très grand nombre de résultats (Total pages estimé: {total_pages}, Total résultats API: {total_results}). "
-                "Pour une exploration plus ciblée et pour vous assurer de ne pas manquer d'entreprises pertinentes en raison des limites d'affichage "
-                "(l'application ne peut traiter qu'un nombre limité de pages au-delà de la première), "
-                "veuillez envisager de :"
-                "\n- Réduire le rayon de recherche."
-                "\n- Affiner davantage votre sélection en utilisant des codes NAF spécifiques."
-                "\n\nCela permettra d'obtenir une liste plus gérable et pertinente."
-            )
+        # If the query is too large (hits API page limit), return to app.py to handle.
+        # This applies if force_full_fetch is False (initial query)
+        # OR if force_full_fetch is True but the (sub)query is still too large (e.g., a whole NAF section).
+        if total_pages >= config.API_MAX_PAGES: # Removed 'and not force_full_fetch'
+            status.update(label=f"Estimation: {total_results} résultats sur {total_pages} pages. Options de recherche affinées vont être proposées.", state="complete")
+            # The actual st.warning message will be shown by app.py
+            return {
+                "status_code": "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN",
+                "page1_results": results_page1,
+                "total_pages_estimated": total_pages,
+                "total_results_estimated": total_results,
+                "original_query_params": base_params.copy() # Full params used for page 1
+            }
+
+        # Proceed with fetching all pages if:
+        # 1. The query is not "too large" (total_pages < config.API_MAX_PAGES)
+        # 2. Or, force_full_fetch is True (even if total_pages >= config.API_MAX_PAGES)
+        entreprises_detaillees.extend(results_page1)
+
+        # Determine the actual number of pages to fetch, respecting API limits
+        pages_to_target_for_fetching_actually = min(total_pages, config.API_MAX_PAGES)
 
         # === Étape 2: Vérifier si d'autres pages sont nécessaires ===
-        if total_pages < 2:
-            status.update(label=f"Recherche terminée. {len(entreprises_detaillees)} entreprises trouvées ({total_pages} page).", state="complete")
+        if pages_to_target_for_fetching_actually < 2:
+            status.update(label=f"Recherche terminée. {len(entreprises_detaillees)} entreprises trouvées ({pages_to_target_for_fetching_actually} page).", state="complete")
             return entreprises_detaillees
 
         # === Étape 3: Préparer et exécuter les appels parallèles (pages 2 à N) ===
-        pages_a_recuperer = list(range(2, total_pages + 1))
+        pages_a_recuperer = list(range(2, pages_to_target_for_fetching_actually + 1))
         total_pages_to_process = len(pages_a_recuperer)
-        # print(f"{dt.datetime.now()} - DEBUG - Starting parallel fetch for {total_pages_to_process} pages (from 2 to {total_pages}).")
-        status.update(label=f"Récupération parallèle limitée des pages 2 à {total_pages} ({total_pages_to_process} pages)...")
+        # print(f"{dt.datetime.now()} - DEBUG - Starting parallel fetch for {total_pages_to_process} pages (from 2 to {pages_to_target_for_fetching_actually}).")
+        status.update(label=f"Récupération parallèle des pages 2 à {pages_to_target_for_fetching_actually} ({total_pages_to_process} pages sur {total_pages} estimées)...")
         start_time_parallel = time.time()
 
         def fetch_page_with_retry(page_num):
@@ -266,16 +282,26 @@ def rechercher_geographiquement_entreprises(lat, long, radius, api_params):
         # Final status message, accounting for potential discrepancies.
         final_count = len(entreprises_detaillees)
         # print(f"{dt.datetime.now()} - INFO - Total entreprises retrieved: {final_count}. API reported total: {total_results}.")
+        
         final_message = f"Recherche terminée. {final_count} entreprises récupérées."
-        expected_results_approx = len(results_page1) + len(results_paralleles)
-        if total_results > expected_results_approx and total_pages > 1:
-             discrepancy = total_results - expected_results_approx # Calculate potential missing results
-             # print(f"{dt.datetime.now()} - WARNING - Discrepancy found: {discrepancy} missing results compared to API total.")
-             final_message += f" (L'API annonçait {total_results} résultats. {discrepancy} manquant(s), possiblement dû à des erreurs)."
-             status.update(label=f"⚠️ {final_message}", state="complete")
+
+        if total_pages > pages_to_target_for_fetching_actually: # We capped the fetching
+            final_message += (
+                f" L'API estimait {total_results} résultats sur {total_pages} pages. "
+                f"La récupération a été limitée à {pages_to_target_for_fetching_actually} pages "
+                f"(jusqu'à {config.API_MAX_TOTAL_RESULTS} résultats)."
+            )
+            status.update(label=f"⚠️ {final_message}", state="complete")
+        elif total_results > final_count and pages_to_target_for_fetching_actually > 1 : # Fetched all targeted pages, but got less than API's initial estimate
+            discrepancy = total_results - final_count # Calculate potential missing results
+            final_message += (
+                f" (L'API annonçait {total_results} résultats au total. "
+                f"{discrepancy} résultat(s) manquant(s) par rapport à l'estimation)."
+            )
+            status.update(label=f"⚠️ {final_message}", state="complete")
         else:
-             total_pages_display = f"sur {total_pages} page{'s' if total_pages > 1 else ''}" if total_pages > 1 else ""
-             final_message += f" {total_pages_display}."
-             status.update(label=final_message, state="complete")
+            pages_display_text = f"sur {pages_to_target_for_fetching_actually} page{'s' if pages_to_target_for_fetching_actually > 1 else ''}"
+            final_message += f" {pages_display_text}."
+            status.update(label=final_message, state="complete")
 
     return entreprises_detaillees

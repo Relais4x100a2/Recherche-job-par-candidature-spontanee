@@ -5,6 +5,11 @@ MIN_DELAY_BETWEEN_REQUESTS = (1.0 / MAX_REQUESTS_PER_SECOND) + 0.02
 MAX_RETRIES_ON_429 = 3
 INITIAL_RETRY_DELAY = 5
 API_BASE_URL = "https://recherche-entreprises.api.gouv.fr"
+API_MAX_TOTAL_RESULTS = 10000 # Documented limit for the API
+API_RESULTS_PER_PAGE = 25 # Standard per_page value used
+API_MAX_PAGES = API_MAX_TOTAL_RESULTS // API_RESULTS_PER_PAGE
+
+
 
 # --- File Paths ---
 # Defines paths for data files used by the application.

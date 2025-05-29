@@ -125,6 +125,15 @@ if "search_coordinates" not in st.session_state:
 if "search_radius" not in st.session_state:
     st.session_state.search_radius = None
 
+# === NEW SESSION STATE VARIABLES FOR BREAKDOWN SEARCH ===
+if "show_breakdown_options" not in st.session_state:
+    st.session_state.show_breakdown_options = False
+if "breakdown_search_pending" not in st.session_state:
+    st.session_state.breakdown_search_pending = False
+if "original_search_context_for_breakdown" not in st.session_state:
+    st.session_state.original_search_context_for_breakdown = None
+# === END NEW SESSION STATE VARIABLES ===
+
 # --- GESTION DE L'ÉTAT DE SESSION POUR LES PARAMÈTRES DE RECHERCHE ---
 # Initialise les sélections par défaut pour les filtres NAF et effectifs
 # si elles ne sont pas déjà présentes dans l'état de session.
@@ -395,56 +404,88 @@ results_container = st.container()
 
 # --- LOGIQUE PRINCIPALE DE RECHERCHE ---
 if lancer_recherche:
-    results_container.empty()  # Nettoyer les anciens résultats
-    
-    # --- Vérifications initiales ---
+    results_container.empty()  # Nettoyer les anciens messages/résultats dans ce conteneur
+    st.session_state.show_breakdown_options = False # Reset flag
+    st.session_state.breakdown_search_pending = False # Reset flag
+    st.session_state.df_search_results = None # Clear previous results display
+
+    # --- Address Check ---
+    # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Address input: '{adresse_input}'")
     if not adresse_input or not adresse_input.strip():
         st.error("⚠️ Veuillez saisir une adresse de référence pour lancer la recherche.")
         st.stop()
-    if not st.session_state.selected_naf_letters:
+
+    # --- NAF Parameter Logic ---
+    final_api_params = {}
+    naf_criteria_message_part = "" # For the st.info message
+
+    has_selected_sections = bool(st.session_state.selected_naf_letters)
+    has_selected_specific_codes = bool(st.session_state.selected_specific_naf_codes)
+
+    if not has_selected_sections:
+        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: No NAF sections selected.")
+        # If no sections are selected, specific codes cannot be valid (as they are filtered by section in the UI callbacks)
+        # on_section_change should clear selected_specific_naf_codes if selected_naf_letters becomes empty.
         st.error("⚠️ Veuillez sélectionner au moins une section NAF.")
         st.stop()
+
+    if has_selected_specific_codes:
+        # User has chosen specific NAF codes. These take precedence.
+        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Using specific NAF codes.")
+        # st.session_state.selected_specific_naf_codes is already filtered by selected sections due to on_section_change.
+        codes_to_use = sorted(list(st.session_state.selected_specific_naf_codes))
+        
+        if not codes_to_use:
+            # This can happen if selected_specific_naf_codes was non-empty but then all its codes were removed
+            # (e.g., by deselecting their parent sections), making it empty.
+            # Fallback to pure section search if sections are still selected.
+            # has_selected_sections should be true here if we passed the first check.
+            sections_for_api = sorted(list(st.session_state.selected_naf_letters))
+            final_api_params["section_activite_principale"] = ",".join(sections_for_api)
+            
+            section_descs = [f"{s} ({config.naf_sections_details.get(s, {}).get('description', 'Section')})" for s in sections_for_api]
+            if len(section_descs) == 1:
+                naf_criteria_message_part = f"la section NAF : {section_descs[0]}"
+            else:
+                naf_criteria_message_part = f"les sections NAF : {', '.join(section_descs)}"
+        else:
+            final_api_params["activite_principale"] = ",".join(codes_to_use)
+            if len(codes_to_use) == 1:
+                naf_criteria_message_part = f"le code NAF spécifique : {codes_to_use[0]}"
+            else:
+                display_codes = codes_to_use
+                if len(display_codes) > 3: # Show first 3 and "..."
+                    display_codes = display_codes[:3] + ["..."]
+                naf_criteria_message_part = f"{len(codes_to_use)} codes NAF spécifiques (ex: {', '.join(display_codes)})"
+    
+    elif has_selected_sections: # And not has_selected_specific_codes
+        # Purely section-based search
+        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Using NAF sections.")
+        sections_for_api = sorted(list(st.session_state.selected_naf_letters))
+        final_api_params["section_activite_principale"] = ",".join(sections_for_api)
+        
+        section_descs = [f"{s} ({config.naf_sections_details.get(s, {}).get('description', 'Section')})" for s in sections_for_api]
+        if len(section_descs) == 1:
+            naf_criteria_message_part = f"la section NAF : {section_descs[0]}"
+        else:
+            naf_criteria_message_part = f"les sections NAF : {', '.join(section_descs)}"
+    else:
+        # This case (no sections, no specific codes) is caught by the initial `if not has_selected_sections:`
+        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Invalid NAF criteria (no sections/codes).")
+        st.error("⚠️ Veuillez sélectionner des critères NAF valides.")
+        st.stop()
+
+    # Check for effectifs selection (common to all NAF paths)
     if not st.session_state.selected_effectifs_codes:
+        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: No effectifs selected.")
         st.warning("⚠️ Veuillez sélectionner au moins une tranche d'effectifs.")
         st.stop()
 
-    # Construction de la liste finale des codes NAF pour l'appel API.
-    # Si des codes spécifiques sont sélectionnés pour une section, ils sont utilisés.
-    # Sinon, tous les codes de la section sélectionnée sont utilisés.
-    final_codes_for_api = set()
-    selected_specifics = st.session_state.selected_specific_naf_codes
-    
-    for section_letter in st.session_state.selected_naf_letters:
-        specifics_in_section = {
-            code
-            for code in selected_specifics
-            if data_utils.get_section_for_code(code) == section_letter
-        }
-        if specifics_in_section:
-            final_codes_for_api.update(specifics_in_section)
-        else:
-            all_codes_in_section = data_utils.get_codes_for_section(section_letter)
-            final_codes_for_api.update(all_codes_in_section)
-
-    if not final_codes_for_api:
-        st.error(
-            "⚠️ Aucun code NAF résultant de votre sélection. Vérifiez vos choix de sections et de codes spécifiques."
-        )
-        st.stop()
-
-    # Préparer les paramètres API
-    final_api_params = {
-        "activite_principale": ",".join(sorted(list(final_codes_for_api)))
-    }
-
     # --- Début du processus dans le conteneur de résultats ---
     with results_container:
-        st.info(
-            f"Recherche pour {len(final_codes_for_api)} code(s) NAF spécifique(s) résultant de la sélection."
-        )
-        codes_display = final_api_params["activite_principale"]
-        if len(codes_display) > 200:
-            codes_display = codes_display[:200] + "..."
+        st.info(f"Recherche en cours pour {naf_criteria_message_part}.")
+
+        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Geocoding address.")
         # 1. Géocodage
         coordonnees = geo_utils.geocoder_ban_france(adresse_input)
         if coordonnees is None:
@@ -452,256 +493,483 @@ if lancer_recherche:
             st.stop()
         lat_centre, lon_centre = coordonnees
 
+        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Calling API client.")
         # 2. Lancer la recherche API
-        entreprises_trouvees = api_client.rechercher_geographiquement_entreprises(
-            lat_centre, lon_centre, radius_input, final_api_params
+        # The api_client function will use st.status internally
+        api_response = api_client.rechercher_geographiquement_entreprises(
+            lat_centre, lon_centre, radius_input, final_api_params, force_full_fetch=False
         )
 
-        # --- Traitement et Affichage des résultats ---
-        if entreprises_trouvees is not None:
+        if isinstance(api_response, dict) and api_response.get("status_code") == "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN":
+            # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: API response needs user confirmation/breakdown.")
+            st.session_state.original_search_context_for_breakdown = {
+                "lat": lat_centre, "lon": lon_centre, "radius": radius_input,
+                "page1_results": api_response["page1_results"],
+                "total_pages_estimated": api_response["total_pages_estimated"],
+                "total_results_estimated": api_response["total_results_estimated"],
+                "original_query_params": api_response["original_query_params"] # Full params from API client
+            }
+            st.session_state.show_breakdown_options = True
+            st.rerun() # Rerun to show breakdown options UI
+
+        elif isinstance(api_response, list): # Normal successful search (not too large, or already processed)
+            # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: API response is a list (normal search).")
+            entreprises_trouvees_list = api_response # Renamed to avoid conflict
             df_resultats = data_utils.traitement_reponse_api(
-                entreprises_trouvees, st.session_state.selected_effectifs_codes
+                entreprises_trouvees_list, st.session_state.selected_effectifs_codes
             )
 
-            # Stocker les résultats et le contexte de la recherche dans l'état de session
-            # pour permettre un affichage persistant même après des reruns (ex: ajout à l'ERM).
-            st.session_state.df_search_results = df_resultats.copy()
+            st.session_state.df_search_results = df_resultats.copy() if not df_resultats.empty else pd.DataFrame()
             st.session_state.search_coordinates = (lat_centre, lon_centre)
             st.session_state.search_radius = radius_input
 
-            # Les messages de succès, la carte et la légende sont gérés en dehors de ce bloc `if lancer_recherche`,
-            # en utilisant l'état de session, pour persister à travers les reruns (par exemple,
-            # après un rerun déclenché par l'ajout d'une entreprise à l'ERM).
+            if not entreprises_trouvees_list: # API returned empty list
+                 st.info("Aucune entreprise trouvée pour les critères spécifiés après la recherche complète.")
+            elif df_resultats.empty and entreprises_trouvees_list: # API had results, but filtering by effectifs yielded none
+                 st.info("Des entreprises ont été trouvées pour les critères NAF/géographiques, mais aucune ne correspond aux tranches d'effectifs sélectionnées.")
 
-            # Display messages for no results or API errors (these don't need to persist beyond the initial search action)
-            if entreprises_trouvees is not None:
-                if (
-                    len(df_resultats) == 0
-                ):  # df_resultats is defined from session_state or fresh search
-                    if (
-                        entreprises_trouvees == []
-                    ):  # API returned empty list for the geo search with NAF
-                        st.info(
-                            "Aucune entreprise trouvée correspondant aux critères NAF/APE dans la zone spécifiée."
+            # --- Ajout automatique des nouvelles entreprises à l'ERM en session ---
+            if not df_resultats.empty:
+                if "SIRET" not in st.session_state.df_entreprises_erm.columns:
+                    sirets_in_erm = pd.Series(dtype="object")
+                else:
+                    sirets_in_erm = st.session_state.df_entreprises_erm["SIRET"]
+
+                df_new_entreprises = df_resultats[~df_resultats["SIRET"].isin(sirets_in_erm)].copy()
+
+                if not df_new_entreprises.empty:
+                    df_to_add = df_new_entreprises.copy()
+                    for col in config.ENTREPRISES_ERM_COLS:
+                        if col not in df_to_add.columns:
+                            df_to_add[col] = pd.NA
+                    df_to_add = df_to_add.reindex(columns=config.ENTREPRISES_ERM_COLS)
+                    st.session_state.df_entreprises_erm = pd.concat(
+                        [st.session_state.df_entreprises_erm, df_to_add], ignore_index=True
+                    ).reindex(columns=config.ENTREPRISES_ERM_COLS)
+                    if "Date de création Entreprise" in st.session_state.df_entreprises_erm.columns:
+                        st.session_state.df_entreprises_erm["Date de création Entreprise"] = pd.to_datetime(
+                            st.session_state.df_entreprises_erm["Date de création Entreprise"], errors='coerce'
                         )
-                    else:  # API returned results, but filtering by effectifs reduced to zero
-                        st.info(
-                            "Des entreprises ont été trouvées dans la zone pour les critères NAF/APE, mais aucun de leurs établissements actifs ne correspond aux tranches d'effectifs sélectionnées."
-                        )
-            else:  # entreprises_trouvees is None, indicating an API call failure
-                st.error(
-                    "La recherche d'entreprises a échoué en raison d'une erreur lors de la communication avec l'API. Vérifiez les messages d'erreur ci-dessus."
-                )
-
-        # --- Ajout automatique des nouvelles entreprises à l'ERM en session ---
-        if not df_resultats.empty:  # Uniquement si des résultats de recherche existent
-            # S'assurer que df_entreprises existe et a la colonne SIRET, sinon initialiser comme vide.
-            if "SIRET" not in st.session_state.df_entreprises_erm.columns: # Devrait être initialisé avec les colonnes
-                sirets_in_erm = pd.Series(dtype="object") # Cas de sécurité si df_entreprises_erm est mal initialisé
-            else:
-                sirets_in_erm = st.session_state.df_entreprises_erm["SIRET"]
-
-            # Identifier les nouvelles entreprises
-            df_new_entreprises = df_resultats[
-                ~df_resultats["SIRET"].isin(sirets_in_erm)
-            ].copy()  # Use .copy() to avoid SettingWithCopyWarning
-
-            if (
-                not df_new_entreprises.empty
-            ):  # Si de nouvelles entreprises sont trouvées
-
-                df_to_add = df_new_entreprises.copy()
-
-                # S'assurer que toutes les colonnes de config.ENTREPRISES_ERM_COLS existent dans df_to_add
-                # Les colonnes non présentes dans df_new_entreprises (issues de la recherche)
-                # mais attendues dans l'ERM (comme 'Notes Personnelles', 'Statut Piste') seront ajoutées avec NA.
-                for col in config.ENTREPRISES_ERM_COLS:
-                    if col not in df_to_add.columns:
-                        df_to_add[col] = pd.NA
-                
-                # Sélectionner et ordonner les colonnes selon config.ENTREPRISES_ERM_COLS
-                df_to_add = df_to_add.reindex(columns=config.ENTREPRISES_ERM_COLS)
-
-                st.session_state.df_entreprises_erm = pd.concat(
-                    [st.session_state.df_entreprises_erm, df_to_add], ignore_index=True
-                ).reindex(columns=config.ENTREPRISES_ERM_COLS) # Assurer l'ordre et la présence de toutes les colonnes ERM
-
-                # Ensure 'Date de création Entreprise' is datetime after concatenation
-                if "Date de création Entreprise" in st.session_state.df_entreprises_erm.columns:
-                    st.session_state.df_entreprises_erm["Date de création Entreprise"] = pd.to_datetime(
-                        st.session_state.df_entreprises_erm["Date de création Entreprise"],
-                        errors='coerce'  # Convert unparseable dates to NaT
+                    on_erm_data_changed()
+                    st.success(
+                        f"{len(df_new_entreprises)} nouvelle(s) entreprise(s) automatiquement ajoutée(s) à votre ERM."
                     )
+                    st.session_state.editor_key_version += 1
+                    # st.rerun() # Rerun might be too disruptive here, results will show anyway
+                elif not df_resultats.empty: # Results found, but all already in ERM
+                    st.info("✔️ Toutes les entreprises trouvées dans cette recherche sont déjà dans votre ERM.")
+            # No rerun here, let the main flow display results from session_state
 
-                on_erm_data_changed() # Sauvegarder les modifications
+        elif api_response is None: # Critical error from API client (e.g. page 1 failed)
+            # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: API response is None (critical error).")
+            # Error message should have been displayed by api_client's st.status
+            st.error("Erreur critique lors de la recherche. Vérifiez les messages ci-dessus.")
+            st.session_state.df_search_results = None # Ensure no stale results are shown
+        
+        else: # Other unexpected response type
+            # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: API response is unexpected type.")
+            st.error("Une erreur inattendue est survenue lors de la recherche.")
+            st.session_state.df_search_results = None
+        
+        # If not a breakdown scenario that reruns, the script continues to display results from session_state
+        if not st.session_state.get("show_breakdown_options", False):
+            st.rerun() # Rerun to make sure the results display section picks up changes
 
-                st.success(
-                    f"{len(df_new_entreprises)} nouvelle(s) entreprise(s) automatiquement ajoutée(s) à votre ERM. N'oubliez pas de sauvegarder vos modifications !"
-                )
-                st.session_state.editor_key_version += 1
+
+# --- UI FOR BREAKDOWN OPTIONS ---
+if st.session_state.get("show_breakdown_options", False):
+    with results_container: # Or a dedicated container for these options
+        context = st.session_state.original_search_context_for_breakdown
+        st.warning(
+            f"⚠️ Votre recherche initiale a retourné une estimation de {context['total_results_estimated']} résultats sur {context['total_pages_estimated']} pages. "
+            "Cela dépasse les limites pratiques pour une récupération directe."
+        )
+        st.markdown(
+            "Pour une exploration plus ciblée et pour vous assurer de ne pas manquer d'entreprises pertinentes :"
+            "\n- **Affinez vos critères** (réduire le rayon, spécifier davantage les codes NAF) et relancez une recherche."
+            "\n- Ou, **lancez une recherche décomposée** : l'application tentera de récupérer les résultats par sous-ensembles (par exemple, par section NAF). Cela peut prendre du temps !"
+        )
+
+        col1_breakdown, col2_breakdown = st.columns(2)
+        with col1_breakdown:
+            if st.button("💡 Affiner mes critères de recherche", type="secondary", key="refine_criteria_btn", use_container_width=True):
+                st.session_state.show_breakdown_options = False
+                # User can now change inputs and click the main "🚀 Rechercher" button again.
+                st.rerun()
+        with col2_breakdown:
+            if st.button("⚙️ Lancer la recherche décomposée", type="warning", key="proceed_breakdown_btn", use_container_width=True):
+                st.session_state.show_breakdown_options = False
+                st.session_state.breakdown_search_pending = True
                 st.rerun()
 
-            elif not df_resultats.empty:
-                st.info(
-                    "✔️ Toutes les entreprises trouvées dans cette recherche sont déjà dans votre ERM ou la recherche n'a pas retourné de nouvelles entreprises à ajouter."
-                )
+# --- LOGIC FOR PERFORMING THE BREAKDOWN SEARCH ---
+if st.session_state.get("breakdown_search_pending", False):
+    context = st.session_state.original_search_context_for_breakdown
+    lat_c, lon_c, rad = context["lat"], context["lon"], context["radius"]
+    # original_api_params_for_breakdown is the full `base_params` from the first call in api_client
+    # It includes geo, per_page, minimal, include, limite_matching_etablissements, AND the NAF params.
+    original_api_params_for_breakdown = context["original_query_params"]
 
-    # --- SECTION ERM ---
+    all_breakdown_results_list = []
+    processed_sirets_in_breakdown = set()
+
+    # Add page 1 results from the initial broad query
+    if context["page1_results"]:
+        sirens_of_companies_added_from_initial_page1 = set()
+        for company_item_initial_p1 in context["page1_results"]:
+            siren_company_initial_p1 = company_item_initial_p1.get("siren")
+            company_had_new_etab_initial_p1 = False
+            if company_item_initial_p1.get("matching_etablissements"):
+                for etab_item_initial_p1 in company_item_initial_p1["matching_etablissements"]:
+                    siret_etab_initial_p1 = etab_item_initial_p1.get("siret")
+                    if siret_etab_initial_p1 and siret_etab_initial_p1 not in processed_sirets_in_breakdown:
+                        processed_sirets_in_breakdown.add(siret_etab_initial_p1)
+                        company_had_new_etab_initial_p1 = True
+            
+            if company_had_new_etab_initial_p1:
+                if siren_company_initial_p1 not in sirens_of_companies_added_from_initial_page1: # Avoid adding same company obj multiple times from this batch
+                    all_breakdown_results_list.append(company_item_initial_p1)
+                    if siren_company_initial_p1:
+                         sirens_of_companies_added_from_initial_page1.add(siren_company_initial_p1)
+    print(f"{datetime.datetime.now()} - DEBUG - Breakdown: Initial processed_sirets_in_breakdown (after page 1 of broad query): {len(processed_sirets_in_breakdown)} SIRETs. Example: {list(processed_sirets_in_breakdown)[:5]}")
+    
+    naf_criteria_to_iterate = []
+    naf_param_key_used = None
+    naf_values_string = None
+
+    if "section_activite_principale" in original_api_params_for_breakdown:
+        naf_param_key_used = "section_activite_principale"
+        naf_values_string = original_api_params_for_breakdown[naf_param_key_used]
+    elif "activite_principale" in original_api_params_for_breakdown:
+        naf_param_key_used = "activite_principale"
+        naf_values_string = original_api_params_for_breakdown[naf_param_key_used]
+
+    if naf_param_key_used and naf_values_string:
+        individual_naf_values = naf_values_string.split(',')
+        if len(individual_naf_values) > 1:
+            for val in individual_naf_values:
+                naf_criteria_to_iterate.append({naf_param_key_used: val.strip()})
+        else: # Single NAF value initially, or became single after some processing
+            naf_criteria_to_iterate.append({naf_param_key_used: naf_values_string})
+    else: # No NAF filter in original query, or it was empty.
+          # We'll run the original query with force_full_fetch=True.
+          # This means no NAF key will be in naf_criterion_map for this iteration.
+        naf_criteria_to_iterate.append({}) 
+
+    with results_container: # Display progress within the results container
+        st.info(f"Lancement de la recherche décomposée en {len(naf_criteria_to_iterate)} sous-ensemble(s)...")
+        
+        # Clear rate limit timestamps once before the batch of breakdown calls
+        with api_client.rate_limit_lock:
+            api_client.request_timestamps.clear()
+            # print(f"{datetime.datetime.now()} - DEBUG - Request timestamps deque cleared for breakdown search batch.")
+
+        for i, naf_criterion_map_for_subset in enumerate(naf_criteria_to_iterate):
+            # This will hold the NAF-specific part of the parameters for the API client
+            current_subset_api_params_for_client = {
+                # k: v for k, v in original_api_params_for_breakdown.items()
+                # if k not in ["lat", "long", "radius", "per_page", "minimal", "include", "limite_matching_etablissements", "page", "activite_principale", "section_activite_principale"]
+            }
+            # The NAF part (activite_principale or section_activite_principale)
+            # is passed as `api_params_from_app` to the API client.
+            # The geo and other fixed params are added inside the API client.
+            # So, `current_subset_api_params_for_client` should ONLY contain the NAF part for this sub-query.
+            
+            # If naf_criterion_map_for_subset is empty (e.g. no NAFs to iterate or original had no NAF),
+            # then we need to pass the original NAF parameters if they existed.
+            if not naf_criterion_map_for_subset: # This means we are processing the "original" criteria as one block
+                if "activite_principale" in original_api_params_for_breakdown:
+                    current_subset_api_params_for_client["activite_principale"] = original_api_params_for_breakdown["activite_principale"]
+                if "section_activite_principale" in original_api_params_for_breakdown:
+                     current_subset_api_params_for_client["section_activite_principale"] = original_api_params_for_breakdown["section_activite_principale"]
+            else: # We are iterating specific NAF criteria
+                current_subset_api_params_for_client.update(naf_criterion_map_for_subset)
+
+
+            desc_critere = ", ".join([f"{k}={v}" for k,v in current_subset_api_params_for_client.items()]) if current_subset_api_params_for_client else "critères originaux (sans décomposition NAF)"
+            st.markdown(f"--- \n**Sous-recherche {i+1}/{len(naf_criteria_to_iterate)} : {desc_critere}**")
+            print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 Sub-search {i+1}/{len(naf_criteria_to_iterate)} for: {desc_critere}. Current total unique SIRETs: {len(processed_sirets_in_breakdown)}")
+            # print(f"{datetime.datetime.now()} - DEBUG - Breakdown sub-search {i+1}: Params for API client: {current_subset_api_params_for_client}")
+            
+            subset_results_list = api_client.rechercher_geographiquement_entreprises(
+                lat_c, lon_c, rad,
+                current_subset_api_params_for_client, # This is the `api_params_from_app` argument
+                force_full_fetch=True
+            )
+
+            processed_subset_as_list = False # Flag to indicate if we handled this subset as a list
+            # Check if this sub-query (especially if it was for a whole section) itself needs further breakdown
+            if isinstance(subset_results_list, dict) and \
+               subset_results_list.get("status_code") == "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN" and \
+               "section_activite_principale" in current_subset_api_params_for_client:
+                
+                section_to_sub_breakdown = current_subset_api_params_for_client["section_activite_principale"]
+                st.warning(f"La sous-recherche pour la section {section_to_sub_breakdown} est encore trop large. Décomposition par code NAF spécifique au sein de cette section...")
+                print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere} needs L2 breakdown. API reported {subset_results_list.get('total_results_estimated')} results.")
+
+                # Add page 1 results from this intermediate broad section query
+                page1_results_from_section_query = subset_results_list.get("page1_results")
+                if page1_results_from_section_query: # This is a list of "entreprise" objects
+                    sirets_added_from_section_page1 = 0
+                    sirens_of_companies_added_from_section_p1 = set()
+                    for company_item_section_p1 in page1_results_from_section_query:
+                        siren_company_section_p1 = company_item_section_p1.get("siren")
+                        company_had_new_etab_section_p1 = False
+                        if company_item_section_p1.get("matching_etablissements"):
+                            for etab_item_section_p1 in company_item_section_p1["matching_etablissements"]:
+                                siret_etab_section_p1 = etab_item_section_p1.get("siret")
+                                if siret_etab_section_p1 and siret_etab_section_p1 not in processed_sirets_in_breakdown:
+                                    processed_sirets_in_breakdown.add(siret_etab_section_p1)
+                                    sirets_added_from_section_page1 += 1 # Count new SIRETs
+                                    company_had_new_etab_section_p1 = True
+                        if company_had_new_etab_section_p1 and siren_company_section_p1 not in sirens_of_companies_added_from_section_p1:
+                            all_breakdown_results_list.append(company_item_section_p1)
+                            if siren_company_section_p1: sirens_of_companies_added_from_section_p1.add(siren_company_section_p1)
+                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L2: Added {sirets_added_from_section_page1} new SIRETs from page 1 of section '{section_to_sub_breakdown}'. Total unique SIRETs now: {len(processed_sirets_in_breakdown)}")
+
+                specific_codes_in_section = data_utils.get_codes_for_section(section_to_sub_breakdown)
+                if not specific_codes_in_section:
+                    st.error(f"Aucun code NAF spécifique trouvé pour la section {section_to_sub_breakdown} pour la sous-décomposition.")
+                else:
+                    st.info(f"Décomposition de la section {section_to_sub_breakdown} en {len(specific_codes_in_section)} codes NAF spécifiques...")
+                    for k, specific_code in enumerate(specific_codes_in_section):
+                        specific_code_params = {"activite_principale": specific_code}
+                        st.markdown(f"--- \n**Sous-sous-recherche {k+1}/{len(specific_codes_in_section)} pour Section {section_to_sub_breakdown} : Code {specific_code}**")
+                        print(f"{datetime.datetime.now()} - DEBUG - Breakdown L2 Sub-sub-search {k+1}/{len(specific_codes_in_section)} for section '{section_to_sub_breakdown}', code '{specific_code}'. Current total unique SIRETs: {len(processed_sirets_in_breakdown)}")
+                        # print(f"{datetime.datetime.now()} - DEBUG - Breakdown sub-sub-search: Code {specific_code}, Params: {specific_code_params}")
+                        sub_subset_results = api_client.rechercher_geographiquement_entreprises(
+                            lat_c, lon_c, rad,
+                            specific_code_params,
+                            force_full_fetch=True # We want all results for this specific code
+                        )
+                        if isinstance(sub_subset_results, list): # List of "entreprise" objects
+                            num_results_in_sub_subset_call = len(sub_subset_results)
+                            count_new_for_sub_subset = 0
+                            newly_added_sirets_this_call = []
+                            sirens_of_companies_added_from_sub_subset = set()
+                            for company_item_sub_subset in sub_subset_results:
+                                siren_company_sub_subset = company_item_sub_subset.get("siren")
+                                company_had_new_etab_sub_subset = False
+                                if company_item_sub_subset.get("matching_etablissements"):
+                                    for etab_item_sub_subset in company_item_sub_subset["matching_etablissements"]:
+                                        siret_etab_sub_subset = etab_item_sub_subset.get("siret")
+                                        if siret_etab_sub_subset and siret_etab_sub_subset not in processed_sirets_in_breakdown:
+                                            processed_sirets_in_breakdown.add(siret_etab_sub_subset)
+                                            count_new_for_sub_subset += 1
+                                            newly_added_sirets_this_call.append(siret_etab_sub_subset)
+                                            company_had_new_etab_sub_subset = True
+                                if company_had_new_etab_sub_subset and siren_company_sub_subset not in sirens_of_companies_added_from_sub_subset:
+                                    all_breakdown_results_list.append(company_item_sub_subset)
+                                    if siren_company_sub_subset: sirens_of_companies_added_from_sub_subset.add(siren_company_sub_subset)
+                                    
+                            st.write(f"➡️ {count_new_for_sub_subset} nouveaux résultats uniques ajoutés pour le code {specific_code}.")
+                            print(f"{datetime.datetime.now()} - DEBUG - Breakdown L2 Sub-sub-search for code '{specific_code}': API returned {num_results_in_sub_subset_call} items. Added {count_new_for_sub_subset} new unique SIRETs. Example new: {newly_added_sirets_this_call[:3]}. Total unique SIRETs now: {len(processed_sirets_in_breakdown)}")
+                        elif isinstance(sub_subset_results, dict) and sub_subset_results.get("status_code") == "NEEDS_USER_CONFIRMATION_OR_BREAKDOWN":
+                            print(f"{datetime.datetime.now()} - WARNING - Breakdown L2 Sub-sub-search for code '{specific_code}' STILL too broad: {sub_subset_results.get('total_results_estimated')} results. Page 1 results from this specific code query are being added.")
+                            # Add page 1 from this specific NAF code query if it's still too broad (should be rare but handle)
+                            page1_results_specific_code = sub_subset_results.get("page1_results")
+                            if page1_results_specific_code: # List of "entreprise" objects
+                                sirens_of_companies_added_from_specific_code_p1 = set()
+                                for company_item_specific_code_p1 in page1_results_specific_code:
+                                    siren_company_specific_code_p1 = company_item_specific_code_p1.get("siren")
+                                    company_had_new_etab_specific_code_p1 = False
+                                    if company_item_specific_code_p1.get("matching_etablissements"):
+                                        for etab_item_specific_code_p1 in company_item_specific_code_p1["matching_etablissements"]:
+                                            siret_etab_specific_code_p1 = etab_item_specific_code_p1.get("siret")
+                                            if siret_etab_specific_code_p1 and siret_etab_specific_code_p1 not in processed_sirets_in_breakdown:
+                                                processed_sirets_in_breakdown.add(siret_etab_specific_code_p1)
+                                                company_had_new_etab_specific_code_p1 = True
+                                    if company_had_new_etab_specific_code_p1 and siren_company_specific_code_p1 not in sirens_of_companies_added_from_specific_code_p1:
+                                        all_breakdown_results_list.append(company_item_specific_code_p1)
+                                        if siren_company_specific_code_p1: sirens_of_companies_added_from_specific_code_p1.add(siren_company_specific_code_p1)
+                        elif sub_subset_results is None:
+                             st.error(f"Erreur critique lors de la sous-sous-recherche pour le code {specific_code}.")
+                        # No further breakdown expected for a single specific NAF code query
+            
+            # Standard processing for results if it was a list (i.e., didn't need sub-breakdown, or was a specific NAF code query)
+            elif isinstance(subset_results_list, list): # Note: elif here
+                processed_subset_as_list = True
+                num_results_in_subset_call = len(subset_results_list)
+                count_new_for_subset = 0
+                newly_added_sirets_this_call_l1 = []
+                for item in subset_results_list:
+                    siret = item.get("siret")
+                    if siret and siret not in processed_sirets_in_breakdown:
+                        all_breakdown_results_list.append(item)
+                        processed_sirets_in_breakdown.add(siret)
+                        count_new_for_subset +=1
+                        newly_added_sirets_this_call_l1.append(siret)
+                
+                # Message about results from this specific sub-query
+                if num_results_in_subset_call > 0 and count_new_for_subset == 0:
+                    st.write(f"➡️ {desc_critere}: {num_results_in_subset_call} résultat(s) trouvé(s) par cette sous-recherche, mais tous étaient déjà collectés globalement.")
+                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere}: API returned {num_results_in_subset_call} items. 0 new unique SIRETs added (all duplicates). Total unique SIRETs: {len(processed_sirets_in_breakdown)}")
+                elif count_new_for_subset > 0:
+                    st.write(f"➡️ {count_new_for_subset} nouveaux résultats uniques ajoutés pour {desc_critere}.")
+                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere}: API returned {num_results_in_subset_call} items. Added {count_new_for_subset} new unique SIRETs. Example new: {newly_added_sirets_this_call_l1[:3]}. Total unique SIRETs: {len(processed_sirets_in_breakdown)}")
+                else: # num_results_in_subset_call == 0
+                    print(f"{datetime.datetime.now()} - DEBUG - Breakdown L1 for {desc_critere}: API returned 0 items.")
+                # If num_results_in_subset_call is 0, no explicit message here,
+                # as the API client's status would have indicated "Aucun résultat trouvé".
+
+            elif subset_results_list is None: # Critical error from API client
+                st.error(f"Erreur critique lors de la sous-recherche pour {desc_critere}. Vérifiez les messages précédents.")
+                print(f"{datetime.datetime.now()} - ERROR - Breakdown L1 for {desc_critere}: API call failed critically (returned None).")
+            # If subset_results_list was a dict but didn't trigger sub-breakdown (e.g. specific NAF code hitting limit), it's an edge case.
+            # For now, we assume specific NAF codes won't trigger NEEDS_USER_CONFIRMATION_OR_BREAKDOWN,
+            # as there's no further NAF breakdown. If they do, their page1_results are implicitly ignored by this structure.
+        
+        st.markdown("--- \n**Fin de la recherche décomposée.**")
+        st.session_state.breakdown_search_pending = False
+        print(f"{datetime.datetime.now()} - DEBUG - Breakdown: Completed. Total unique SIRETs collected: {len(processed_sirets_in_breakdown)}. Total items in all_breakdown_results_list: {len(all_breakdown_results_list)}")
+        
+        if all_breakdown_results_list:
+            # print(f"{datetime.datetime.now()} - DEBUG - Breakdown search: Processing {len(all_breakdown_results_list)} total raw results.")
+            df_final_results = data_utils.traitement_reponse_api(
+                all_breakdown_results_list, st.session_state.selected_effectifs_codes
+            )
+            st.session_state.df_search_results = df_final_results.copy() if not df_final_results.empty else pd.DataFrame()
+            st.session_state.search_coordinates = (lat_c, lon_c)
+            st.session_state.search_radius = rad
+            
+            # Add new results from breakdown to ERM
+            if not df_final_results.empty:
+                if "SIRET" not in st.session_state.df_entreprises_erm.columns:
+                    sirets_in_erm_bd = pd.Series(dtype="object")
+                else:
+                    sirets_in_erm_bd = st.session_state.df_entreprises_erm["SIRET"]
+                df_new_entreprises_bd = df_final_results[~df_final_results["SIRET"].isin(sirets_in_erm_bd)].copy()
+                if not df_new_entreprises_bd.empty:
+                    df_to_add_bd = df_new_entreprises_bd.copy()
+                    for col_bd in config.ENTREPRISES_ERM_COLS:
+                        if col_bd not in df_to_add_bd.columns:
+                            df_to_add_bd[col_bd] = pd.NA
+                    df_to_add_bd = df_to_add_bd.reindex(columns=config.ENTREPRISES_ERM_COLS)
+                    st.session_state.df_entreprises_erm = pd.concat(
+                        [st.session_state.df_entreprises_erm, df_to_add_bd], ignore_index=True
+                    ).reindex(columns=config.ENTREPRISES_ERM_COLS)
+                    if "Date de création Entreprise" in st.session_state.df_entreprises_erm.columns:
+                        st.session_state.df_entreprises_erm["Date de création Entreprise"] = pd.to_datetime(
+                            st.session_state.df_entreprises_erm["Date de création Entreprise"], errors='coerce'
+                        )
+                    on_erm_data_changed()
+                    st.success(f"{len(df_new_entreprises_bd)} nouvelle(s) entreprise(s) issue(s) de la recherche décomposée ajoutée(s) à l'ERM.")
+                    st.session_state.editor_key_version += 1
+
+            st.success(f"Recherche décomposée terminée. {len(df_final_results) if not df_final_results.empty else 0} établissements uniques trouvés au total.")
+        else:
+            # print(f"{datetime.datetime.now()} - DEBUG - Breakdown search: No results from breakdown.")
+            st.info("La recherche décomposée n'a retourné aucun résultat.")
+            st.session_state.df_search_results = pd.DataFrame()
+
+        st.rerun()
 
 
 # --- AFFICHAGE PERSISTANT DES RÉSULTATS DE RECHERCHE (SI EXISTANTS) ---
-with results_container:
-    if (
-        st.session_state.df_search_results is not None
-        and not st.session_state.df_search_results.empty
-        and st.session_state.search_coordinates is not None
-        and st.session_state.search_radius is not None
-    ):
-        # Utiliser les variables de session pour afficher les résultats
-        df_search_results_display = st.session_state.df_search_results
-        lat_centre_display, lon_centre_display = st.session_state.search_coordinates
-        radius_display = st.session_state.search_radius
+with results_container: # This container is now also used by breakdown logic for its messages
+    # Check if there are results to display from session_state
+    # This section will render after a normal search, or after a breakdown search completes.
+    # It will also render if show_breakdown_options is true, but the map/table won't show then.
+    if not st.session_state.get("show_breakdown_options", False) and \
+       not st.session_state.get("breakdown_search_pending", False) and \
+       st.session_state.df_search_results is not None:
 
-        st.success(
-            f"📊 {len(df_search_results_display)} établissements trouvés correspondant à tous les critères."
-        )
+        if not st.session_state.df_search_results.empty and \
+           st.session_state.search_coordinates is not None and \
+           st.session_state.search_radius is not None:
+            
+            # Utiliser les variables de session pour afficher les résultats
+            df_search_results_display = st.session_state.df_search_results
+            lat_centre_display, lon_centre_display = st.session_state.search_coordinates
+            radius_display = st.session_state.search_radius
 
-        # Affichage Carte
-        # La carte est affichée si des résultats valides (avec coordonnées) existent.
-        st.subheader("Carte des établissements trouvés")
-        df_map_display = df_search_results_display.dropna(
-            subset=["Latitude", "Longitude", "Radius", "Color"]
-        ).copy()
+            st.success(
+                f"📊 {len(df_search_results_display)} établissements trouvés correspondant à tous les critères."
+            )
 
-        if not df_map_display.empty:
-            zoom_level = 11
-            # Ajustement du niveau de zoom initial en fonction du rayon de recherche
-            if radius_display <= 1:
-                zoom_level = 14
-            elif radius_display <= 5:
-                zoom_level = 12
-            elif radius_display <= 10:
+            # Affichage Carte
+            st.subheader("Carte des établissements trouvés")
+            df_map_display = df_search_results_display.dropna(
+                subset=["Latitude", "Longitude", "Radius", "Color"]
+            ).copy()
+
+            if not df_map_display.empty:
                 zoom_level = 11
-            elif radius_display <= 25:
-                zoom_level = 10
-            else:
-                zoom_level = 9
+                if radius_display <= 1: zoom_level = 14
+                elif radius_display <= 5: zoom_level = 12
+                elif radius_display <= 10: zoom_level = 11
+                elif radius_display <= 25: zoom_level = 10
+                else: zoom_level = 9
 
-            initial_view_state = pdk.ViewState(
-                latitude=lat_centre_display,
-                longitude=lon_centre_display,
-                zoom=zoom_level,
-                pitch=0,
-                bearing=0,
-            )
-            layer = pdk.Layer(
-                "ScatterplotLayer",
-                data=df_map_display,
-                get_position="[Longitude, Latitude]",
-                get_color="Color",
-                get_radius="Radius",
-                radius_min_pixels=3,
-                radius_max_pixels=60,
-                pickable=True,
-                auto_highlight=True,
-            )
-            tooltip = {
-                "html": "<b>{Dénomination - Enseigne}</b><br/>SIRET: {SIRET}<br/>Activité Étab.: {Activité NAF/APE Etablissement}<br/>Effectif Étab.: {Nb salariés établissement}",
-                "style": {
-                    "backgroundColor": "rgba(0,0,0,0.7)",
-                    "color": "white",
-                    "border": "1px solid white",
-                    "padding": "5px",
-                },
-            }
-            deck = pdk.Deck(
-                layers=[layer],
-                initial_view_state=initial_view_state,
-                map_style="mapbox://styles/mapbox/light-v9",
-                tooltip=tooltip,
-                height=600,
-            )
-            st.pydeck_chart(deck)
-
-            # Affichage Légende
-            # La légende est générée dynamiquement en fonction des données affichées sur la carte.
-            st.subheader("Légende")
-            cols_legende = st.columns([1, 2])
-            with cols_legende[0]:
-                st.markdown("**Taille ≈ Effectif établissement**")
-                legend_pixel_sizes = {"01": 8, "12": 12, "32": 18, "53": 24}
-                base_circle_style = "display: inline-block; border-radius: 50%; background-color: #808080; margin-right: 5px; vertical-align: middle;"
-                legend_sizes = {
-                    "01": "Petit",
-                    "12": "Moyen",
-                    "32": "Grand",
-                    "53": "Très Grand",
-                }
-                active_eff_codes = set(
-                    st.session_state.selected_effectifs_codes
+                initial_view_state = pdk.ViewState(
+                    latitude=lat_centre_display, longitude=lon_centre_display,
+                    zoom=zoom_level, pitch=0, bearing=0,
                 )
-                displayed_legend_sizes = set()
-                for (
-                    group_label,
-                    group_codes,
-                ) in config.effectifs_groupes.items():
-                    if any(code in active_eff_codes for code in group_codes):
-                        rep_code = next(
-                            (c for c in ["01", "12", "32", "53"] if c in group_codes),
-                            None,
-                        )
-                        if rep_code and rep_code not in displayed_legend_sizes:
-                            displayed_legend_sizes.add(rep_code)
-                            label = legend_sizes[rep_code]
-                            pixel_size = legend_pixel_sizes.get(rep_code, 8)
-                            circle_html = f'<span style="{base_circle_style} height: {pixel_size}px; width: {pixel_size}px;"></span>'
-                            st.markdown(
-                                f"{circle_html} {label} ({group_label})",
-                                unsafe_allow_html=True,
-                            )
-            with cols_legende[1]:
-                st.markdown("**Couleur = Secteur d'activité**")
-                if "Section NAF" in df_map_display.columns:
-                    sections_in_final_results = sorted(
-                        list(set(df_map_display["Section NAF"].unique()) - {"N/A"})
-                    )
-                    if not sections_in_final_results:
-                        st.caption("Aucune section NAF trouvée dans les résultats.")
+                layer = pdk.Layer(
+                    "ScatterplotLayer", data=df_map_display,
+                    get_position="[Longitude, Latitude]", get_color="Color", get_radius="Radius",
+                    radius_min_pixels=3, radius_max_pixels=60,
+                    pickable=True, auto_highlight=True,
+                )
+                tooltip = {
+                    "html": "<b>{Dénomination - Enseigne}</b><br/>SIRET: {SIRET}<br/>Activité Étab.: {Activité NAF/APE Etablissement}<br/>Effectif Étab.: {Nb salariés établissement}",
+                    "style": {"backgroundColor": "rgba(0,0,0,0.7)", "color": "white", "border": "1px solid white", "padding": "5px"},
+                }
+                deck = pdk.Deck(
+                    layers=[layer], initial_view_state=initial_view_state,
+                    map_style="mapbox://styles/mapbox/light-v9", tooltip=tooltip, height=600,
+                )
+                st.pydeck_chart(deck)
+
+                # Affichage Légende
+                st.subheader("Légende")
+                cols_legende = st.columns([1, 2])
+                with cols_legende[0]:
+                    st.markdown("**Taille ≈ Effectif établissement**")
+                    legend_pixel_sizes = {"01": 8, "12": 12, "32": 18, "53": 24}
+                    base_circle_style = "display: inline-block; border-radius: 50%; background-color: #808080; margin-right: 5px; vertical-align: middle;"
+                    legend_sizes = {"01": "Petit", "12": "Moyen", "32": "Grand", "53": "Très Grand"}
+                    active_eff_codes = set(st.session_state.selected_effectifs_codes)
+                    displayed_legend_sizes = set()
+                    for group_label, group_details in config.effectifs_groupes_details.items(): # Use groupes_details
+                        group_codes = group_details["codes"]
+                        if any(code in active_eff_codes for code in group_codes):
+                            rep_code = next((c for c in ["01", "12", "32", "53"] if c in group_codes), None)
+                            if rep_code and rep_code not in displayed_legend_sizes:
+                                displayed_legend_sizes.add(rep_code)
+                                label = legend_sizes[rep_code]
+                                pixel_size = legend_pixel_sizes.get(rep_code, 8)
+                                circle_html = f'<span style="{base_circle_style} height: {pixel_size}px; width: {pixel_size}px;"></span>'
+                                st.markdown(f"{circle_html} {label} ({group_details['label']})", unsafe_allow_html=True)
+                with cols_legende[1]:
+                    st.markdown("**Couleur = Secteur d'activité**")
+                    if "Section NAF" in df_map_display.columns:
+                        sections_in_final_results = sorted(list(set(df_map_display["Section NAF"].unique()) - {"N/A"}))
+                        if not sections_in_final_results:
+                            st.caption("Aucune section NAF trouvée dans les résultats.")
+                        else:
+                            legend_color_cols = st.columns(3)
+                            col_idx_legend_color = 0
+                            for letter in sections_in_final_results:
+                                if letter in config.naf_sections_details:
+                                    with legend_color_cols[col_idx_legend_color % len(legend_color_cols)]:
+                                        color_rgb = config.naf_color_mapping.get(letter, [128, 128, 128])
+                                        color_hex = "#%02x%02x%02x" % tuple(color_rgb)
+                                        desc_legende = config.naf_sections_details[letter]["description"]
+                                        st.markdown(f"<span style='color:{color_hex}; font-size: 1.2em; display: inline-block; margin-right: 4px;'>⬤</span>{desc_legende}", unsafe_allow_html=True)
+                                    col_idx_legend_color += 1
                     else:
-                        # Créer 3 colonnes pour la légende des couleurs NAF
-                        legend_color_cols = st.columns(3)
-                        col_idx_legend_color = 0
-                        for letter in sections_in_final_results:
-                            if letter in config.naf_sections_details:
-                                # Placer chaque élément de la légende dans une colonne
-                                with legend_color_cols[
-                                    col_idx_legend_color % len(legend_color_cols)
-                                ]:
-                                    color_rgb = config.naf_color_mapping.get(
-                                        letter, [128, 128, 128]
-                                    )
-                                    color_hex = "#%02x%02x%02x" % tuple(color_rgb)
-                                    desc_legende = config.naf_sections_details[letter][
-                                        "description"
-                                    ]
-                                    st.markdown(
-                                        f"<span style='color:{color_hex}; font-size: 1.2em; display: inline-block; margin-right: 4px;'>⬤</span>{desc_legende}",  # Ajustement taille et espacement
-                                        unsafe_allow_html=True,
-                                    )
-                                col_idx_legend_color += 1
+                        st.warning("Colonne 'Section NAF' non trouvée pour la légende des couleurs.")
+            else: # df_map_display is empty
+                st.info("Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte.")
+        
+        elif st.session_state.df_search_results is not None and st.session_state.df_search_results.empty:
+             # This case is for when a search (normal or breakdown) explicitly resulted in zero companies
+             # The messages for this are handled within the lancer_recherche or breakdown block.
+             # We can add a generic one here if needed, but it might be redundant.
+             # st.info("Votre recherche n'a retourné aucun établissement.")
+             pass
 
-                else:
-                    st.warning(
-                        "Colonne 'Section NAF' non trouvée pour la légende des couleurs."
-                    )
-        else:
-            st.info(
-                "Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte."
-            )
-
-    # Les messages "aucun résultat" ou "erreur API" sont gérés dans le bloc `if lancer_recherche:`
-    # car ils sont un retour direct à l'action de recherche et n'ont pas besoin de persister
-    # de la même manière que la carte pour des résultats réussis après un rerun.
 
 # --- AFFICHAGE DU TABLEAU ERM ---
 # Ce tableau affiche les entreprises stockées dans st.session_state.df_entreprises_erm.

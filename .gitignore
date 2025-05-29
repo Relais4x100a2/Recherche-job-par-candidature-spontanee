@@ -1,6 +1,8 @@
 venv/
 .idea/
+.devcontainer/
 __pycache__/
+.gitignore
 
 # User-specific data
 user_data/
