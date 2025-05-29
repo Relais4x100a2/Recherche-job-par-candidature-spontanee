@@ -95,7 +95,8 @@ def rechercher_entreprises_par_localisation_et_criteres(list_localisation_codes,
     base_api_params_for_search.update({
         'per_page': 25,
         'minimal': 'true',
-        'include': 'matching_etablissements,finances',
+        'etat_administratif' : 'A',
+        'include' : 'matching_etablissements,finances',
         'limite_matching_etablissements': 100 
     })
     headers = {'accept': 'application/json'}

@@ -49,35 +49,41 @@ def load_global_erm_data(file_path=config.DEFAULT_ERM_FILE_PATH):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            df_e = pd.DataFrame(data.get("entreprises", []))
-            df_c = pd.DataFrame(data.get("contacts", []))
-            df_a = pd.DataFrame(data.get("actions", []))
-
-            # Convert specific columns to datetime objects
-            date_cols_entreprise = ["Date de création Entreprise"]
-            date_cols_action = ["Date Action", "Date Échéance"]
-
-            for col in date_cols_entreprise:
-                if col in df_e.columns:
-                    df_e[col] = pd.to_datetime(df_e[col], errors='coerce')
-            for col in date_cols_action:
-                if col in df_a.columns:
-                    df_a[col] = pd.to_datetime(df_a[col], errors='coerce')
-
+            # Initialize with loaded data, then ensure schema and dtypes
+            df_e = pd.DataFrame(data.get("entreprises", [])).reindex(columns=config.ENTREPRISES_ERM_COLS)
+            df_c = pd.DataFrame(data.get("contacts", [])).reindex(columns=config.CONTACTS_ERM_COLS)
+            df_a = pd.DataFrame(data.get("actions", [])).reindex(columns=config.ACTIONS_ERM_COLS)
         except (json.JSONDecodeError, KeyError) as e:
             st.error(f"Erreur de lecture ou format incorrect du fichier ERM ({file_path}): {e}. Un nouveau fichier sera utilisé/créé si des données sont sauvegardées.")
-            df_e = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS)
-            df_c = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
-            df_a = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+            df_e = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES)
+            df_c = pd.DataFrame(columns=config.CONTACTS_ERM_COLS) # Add dtypes if defined
+            df_a = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)   # Add dtypes if defined
     else:
-        df_e = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS)
-        df_c = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
-        df_a = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+        df_e = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES)
+        df_c = pd.DataFrame(columns=config.CONTACTS_ERM_COLS) # Add dtypes if defined
+        df_a = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)   # Add dtypes if defined
 
-    # Ensure all expected columns are present and in correct order
-    df_e = df_e.reindex(columns=config.ENTREPRISES_ERM_COLS)
-    df_c = df_c.reindex(columns=config.CONTACTS_ERM_COLS)
-    df_a = df_a.reindex(columns=config.ACTIONS_ERM_COLS)
+    # Apply/Ensure dtypes for df_e
+    if not df_e.empty:
+        for col_name, target_dtype in config.ENTREPRISES_ERM_DTYPES.items():
+            if col_name in df_e.columns:
+                if target_dtype == "datetime64[ns]":
+                    df_e[col_name] = pd.to_datetime(df_e[col_name], errors='coerce')
+                else:
+                    try:
+                        df_e[col_name] = df_e[col_name].astype(target_dtype)
+                    except Exception as e_astype:
+                        # Fallback for columns that might be all None from JSON if astype fails
+                        if df_e[col_name].isnull().all():
+                            df_e[col_name] = pd.Series(index=df_e.index, dtype=target_dtype)
+                        else:
+                            st.warning(f"Could not convert column {col_name} to {target_dtype} during load: {e_astype}")
+    elif df_e.empty and not hasattr(df_e, '_is_astype_applied_custom_tag'): # Ensure dtypes for initially empty df_e
+        df_e = df_e.astype(config.ENTREPRISES_ERM_DTYPES)
+        df_e._is_astype_applied_custom_tag = True # Mark that astype was applied
+
+    # TODO: Apply similar dtype logic for df_c and df_a if CONTACTS_ERM_DTYPES and ACTIONS_ERM_DTYPES are defined in config.py
+
     
     return df_e, df_c, df_a
 
@@ -109,11 +115,11 @@ def on_erm_data_changed():
 # Initialisation des DataFrames ERM s'ils n'existent pas encore dans la session.
 # Sera rempli par load_global_erm_data plus tard.
 if "df_entreprises_erm" not in st.session_state:
-    st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS)
+    st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES)
 if "df_contacts_erm" not in st.session_state:
-    st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
+    st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS) # Add .astype if dtypes defined
 if "df_actions_erm" not in st.session_state:
-    st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+    st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS) # Add .astype if dtypes defined
 if "confirm_flush" not in st.session_state:
     st.session_state.confirm_flush = False
 if "editor_key_version" not in st.session_state:
@@ -565,18 +571,25 @@ if lancer_recherche:
                 df_new_entreprises = df_resultats[~df_resultats["SIRET"].isin(sirets_in_erm)].copy()
 
                 if not df_new_entreprises.empty:
-                    df_to_add = df_new_entreprises.copy()
-                    for col in config.ENTREPRISES_ERM_COLS:
-                        if col not in df_to_add.columns:
-                            df_to_add[col] = pd.NA
-                    df_to_add = df_to_add.reindex(columns=config.ENTREPRISES_ERM_COLS)
+                    # Prepare df_to_add with the correct schema and dtypes
+                    current_df_to_add = pd.DataFrame(index=df_new_entreprises.index)
+                    for col_erm in config.ENTREPRISES_ERM_COLS:
+                        if col_erm in df_new_entreprises.columns:
+                            current_df_to_add[col_erm] = df_new_entreprises[col_erm]
+                        else:
+                            current_df_to_add[col_erm] = pd.NA
+                    
+                    for col_name, dtype_val in config.ENTREPRISES_ERM_DTYPES.items():
+                        if col_name in current_df_to_add.columns:
+                            if dtype_val == "datetime64[ns]":
+                                current_df_to_add[col_name] = pd.to_datetime(current_df_to_add[col_name], errors='coerce')
+                            else:
+                                current_df_to_add[col_name] = current_df_to_add[col_name].astype(dtype_val)
+                    df_to_add = current_df_to_add.reset_index(drop=True)
+
                     st.session_state.df_entreprises_erm = pd.concat(
                         [st.session_state.df_entreprises_erm, df_to_add], ignore_index=True
                     ).reindex(columns=config.ENTREPRISES_ERM_COLS)
-                    if "Date de création Entreprise" in st.session_state.df_entreprises_erm.columns:
-                        st.session_state.df_entreprises_erm["Date de création Entreprise"] = pd.to_datetime(
-                            st.session_state.df_entreprises_erm["Date de création Entreprise"], errors='coerce'
-                        )
                     on_erm_data_changed()
                     st.success(
                         f"{len(df_new_entreprises)} nouvelle(s) entreprise(s) automatiquement ajoutée(s) à votre ERM."
@@ -775,19 +788,26 @@ if st.session_state.get("breakdown_search_pending", False):
                 else:
                     sirets_in_erm_bd = st.session_state.df_entreprises_erm["SIRET"]
                 df_new_entreprises_bd = df_final_results[~df_final_results["SIRET"].isin(sirets_in_erm_bd)].copy()
+                
                 if not df_new_entreprises_bd.empty:
-                    df_to_add_bd = df_new_entreprises_bd.copy()
-                    for col_bd in config.ENTREPRISES_ERM_COLS:
-                        if col_bd not in df_to_add_bd.columns:
-                            df_to_add_bd[col_bd] = pd.NA
-                    df_to_add_bd = df_to_add_bd.reindex(columns=config.ENTREPRISES_ERM_COLS)
+                    # Prepare df_to_add_bd with the correct schema and dtypes
+                    current_df_to_add_bd = pd.DataFrame(index=df_new_entreprises_bd.index)
+                    for col_erm_bd in config.ENTREPRISES_ERM_COLS:
+                        if col_erm_bd in df_new_entreprises_bd.columns:
+                            current_df_to_add_bd[col_erm_bd] = df_new_entreprises_bd[col_erm_bd]
+                        else:
+                            current_df_to_add_bd[col_erm_bd] = pd.NA
+                    for col_name_bd, dtype_val_bd in config.ENTREPRISES_ERM_DTYPES.items():
+                        if col_name_bd in current_df_to_add_bd.columns:
+                            if dtype_val_bd == "datetime64[ns]":
+                                current_df_to_add_bd[col_name_bd] = pd.to_datetime(current_df_to_add_bd[col_name_bd], errors='coerce')
+                            else:
+                                current_df_to_add_bd[col_name_bd] = current_df_to_add_bd[col_name_bd].astype(dtype_val_bd)
+                    df_to_add_bd = current_df_to_add_bd.reset_index(drop=True)
+
                     st.session_state.df_entreprises_erm = pd.concat(
                         [st.session_state.df_entreprises_erm, df_to_add_bd], ignore_index=True
                     ).reindex(columns=config.ENTREPRISES_ERM_COLS)
-                    if "Date de création Entreprise" in st.session_state.df_entreprises_erm.columns:
-                        st.session_state.df_entreprises_erm["Date de création Entreprise"] = pd.to_datetime(
-                            st.session_state.df_entreprises_erm["Date de création Entreprise"], errors='coerce'
-                        )
                     on_erm_data_changed()
                     st.success(f"{len(df_new_entreprises_bd)} nouvelle(s) entreprise(s) issue(s) de la recherche décomposée ajoutée(s) à l'ERM.")
                     st.session_state.editor_key_version += 1
@@ -989,7 +1009,7 @@ else:  # df_entreprises_erm is not empty
     # "Effectif Numérique" n'est pas affiché directement mais utilisé pour formater "Nb salariés établissement".
     display_order_base = [
         "SIRET", "Dénomination - Enseigne", 
-        "Activité NAF/APE Etablissement", "Adresse établissement", 
+        "Activité NAF/APE Etablissement", "Adresse établissement", "Commune",
         "Nb salariés établissement", # Colonne formatée
         "Est siège social", "Date de création Entreprise",
         "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise"
@@ -1053,7 +1073,7 @@ if not st.session_state.df_entreprises_erm.empty:
     with st.expander("Zone de danger", expanded=True):
         st.warning("Attention : Cette action effacera **toutes** les entreprises actuellement affichées dans le tableau.")
         if st.button("🗑️ Effacer le tableau des établissements", key="clear_table_button_in_danger_zone"): # Ajout d'une clé unique
-            st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS) # Réinitialise le DataFrame
+            st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES) # Réinitialise avec dtypes
             # Optionnel: effacer aussi contacts et actions si liés, ou laisser pour une gestion manuelle
             # st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
             # st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)

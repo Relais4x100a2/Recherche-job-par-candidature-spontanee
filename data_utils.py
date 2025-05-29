@@ -252,6 +252,7 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
                         "code_naf_etablissement": etab.get("activite_principale"),
                         "adresse": etab.get("adresse"),
                         "latitude": etab.get("latitude"),
+                        "Commune": etab.get("libelle_commune"), # <-- ADDED COMMUNE HERE
                         "longitude": etab.get("longitude"),
                         "est_siege": etab.get("est_siege", False),
                         "nom_complet_entreprise": processed_name,  # Use the processed name
@@ -359,6 +360,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "Activité NAF/APE Entreprise",
                 "code_naf_entreprise",
                 "Adresse établissement",
+                "Commune", # <-- ADDED COMMUNE
                 "Nb salariés établissement",
                 "Est siège social",
                 "Date de création Entreprise",
@@ -391,6 +393,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "Recherche Google Maps",
                 "Recherche Indeed",
                 "Activité NAF/APE Etablissement",
+                "Commune", # <-- ADDED COMMUNE
                 "Adresse établissement",
                 "Nb salariés établissement",
                 "Est siège social",
@@ -436,32 +439,34 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                     value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Aindeed.com","Recherche Indeed")'
                 )
                 # Col 6: Activité NAF/APE Etablissement
-                ws_entreprises.cell(row=excel_row, column=6, value=f"=DATA_IMPORT!C{excel_row}")
+                ws_entreprises.cell(row=excel_row, column=6, value=f"=DATA_IMPORT!C{excel_row}") # Activité NAF/APE Etablissement
                 # Col 7: Adresse établissement (Source: DATA_IMPORT col G)
-                ws_entreprises.cell(row=excel_row, column=7, value=f"=DATA_IMPORT!G{excel_row}")
-                # Col 8: Nb salariés établissement (Source: DATA_IMPORT col H)
-                ws_entreprises.cell(
-                    row=excel_row, column=8, value=f"=DATA_IMPORT!H{excel_row}"
-                )
-                # Col 9: Est siège social (Source: DATA_IMPORT col I)
+                ws_entreprises.cell(row=excel_row, column=7, value=f"=DATA_IMPORT!G{excel_row}") # Adresse établissement
+                # Col 8: Commune (Source: DATA_IMPORT col H)
+                ws_entreprises.cell(row=excel_row, column=8, value=f"=DATA_IMPORT!H{excel_row}") # Commune
+                # Col 9: Nb salariés établissement (Source: DATA_IMPORT col I)
                 ws_entreprises.cell(
                     row=excel_row, column=9, value=f"=DATA_IMPORT!I{excel_row}"
                 )
-                # Col 10: Date de création Entreprise (Source: DATA_IMPORT col J)
+                # Col 10: Est siège social (Source: DATA_IMPORT col J)
                 ws_entreprises.cell(
                     row=excel_row, column=10, value=f"=DATA_IMPORT!J{excel_row}"
                 )
-                # Col 11: Chiffre d'Affaires Entreprise (Source: DATA_IMPORT col K)
+                # Col 11: Date de création Entreprise (Source: DATA_IMPORT col K)
                 ws_entreprises.cell(
                     row=excel_row, column=11, value=f"=DATA_IMPORT!K{excel_row}"
                 )
-                # Col 12: Résultat Net Entreprise (Source: DATA_IMPORT col L)
+                # Col 12: Chiffre d'Affaires Entreprise (Source: DATA_IMPORT col L)
                 ws_entreprises.cell(
                     row=excel_row, column=12, value=f"=DATA_IMPORT!L{excel_row}"
                 )
-                # Col 13: Année Finances Entreprise (Source: DATA_IMPORT col M)
+                # Col 13: Résultat Net Entreprise (Source: DATA_IMPORT col M)
                 ws_entreprises.cell(
                     row=excel_row, column=13, value=f"=DATA_IMPORT!M{excel_row}"
+                )
+                # Col 14: Année Finances Entreprise (Source: DATA_IMPORT col N)
+                ws_entreprises.cell(
+                    row=excel_row, column=14, value=f"=DATA_IMPORT!N{excel_row}"
                 )
                 # SIREN column (formerly col 14) is removed from ENTREPRISES sheet
             
@@ -753,6 +758,7 @@ def generate_user_erm_excel(
                 "Dénomination - Enseigne",
                 "Activité NAF/APE Etablissement",
                 "Adresse établissement",
+                "Commune", # <-- ADDED COMMUNE
                 "Nb salariés établissement",
                 "Est siège social",
                 "Date de création Entreprise",
@@ -788,6 +794,7 @@ def generate_user_erm_excel(
                 "Recherche Google Maps",
                 "Recherche Indeed",
                 "Activité NAF/APE Etablissement",
+                "Commune", # <-- ADDED COMMUNE
                 "Adresse établissement",
                 "Nb salariés établissement",
                 "Est siège social",

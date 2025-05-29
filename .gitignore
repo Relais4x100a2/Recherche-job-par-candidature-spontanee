@@ -1,6 +1,6 @@
 venv/
 .idea/
-.devcontainer/
+.devcontainer/*.*
 __pycache__/
 .gitignore
 

@@ -1,3 +1,5 @@
+import pandas as pd
+
 # --- Constantes API & Rate Limiting ---
 # Defines parameters for interacting with external APIs, focusing on rate limiting.
 MAX_REQUESTS_PER_SECOND = 6
@@ -23,6 +25,7 @@ ENTREPRISES_ERM_COLS = [
     "Dénomination - Enseigne",
     "Activité NAF/APE Etablissement",
     "Adresse établissement",
+    "Commune",
     "Code effectif établissement",
     "Nb salariés établissement",
     "Effectif Numérique",
@@ -34,6 +37,25 @@ ENTREPRISES_ERM_COLS = [
     "Notes Personnelles",  # User-editable notes for an enterprise.
     "Statut Piste",        # User-editable status for an enterprise lead.
 ]
+
+ENTREPRISES_ERM_DTYPES = {
+    "SIRET": pd.StringDtype(),
+    "Dénomination - Enseigne": pd.StringDtype(),
+    "Activité NAF/APE Etablissement": pd.StringDtype(),
+    "Adresse établissement": pd.StringDtype(),
+    "Commune": pd.StringDtype(),
+    "Code effectif établissement": pd.StringDtype(),
+    "Nb salariés établissement": pd.StringDtype(),
+    "Effectif Numérique": pd.Int64Dtype(),
+    "Est siège social": pd.BooleanDtype(),
+    "Date de création Entreprise": "datetime64[ns]",
+    "Chiffre d'Affaires Entreprise": pd.Float64Dtype(),
+    "Résultat Net Entreprise": pd.Float64Dtype(),
+    "Année Finances Entreprise": pd.StringDtype(),
+    "Notes Personnelles": pd.StringDtype(),
+    "Statut Piste": pd.StringDtype(),
+}
+
 
 CONTACTS_ERM_COLS = [
     "ID Contact", # Unique identifier for a contact.
@@ -336,6 +358,7 @@ COLS_DISPLAY_TABLE = [
     "Dénomination - Enseigne",
     "Est siège social",
     "Adresse établissement",
+    "Commune",
     "Activité NAF/APE Etablissement",
     "Activité NAF/APE Entreprise",
     "Nb salariés établissement",
@@ -355,6 +378,7 @@ COLS_EXPORT_ORDER = [
     "code_naf_entreprise",
     "Est siège social",
     "Adresse établissement",
+    "Commune",
     "Nb salariés établissement",
     "Année nb salariés établissement",
     "Code effectif établissement",
