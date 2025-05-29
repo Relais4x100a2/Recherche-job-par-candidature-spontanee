@@ -1,3 +1,6 @@
+[![Python Tests](https://github.com/Relais4x100a2/Recherche-job-par-candidature-spontanee/actions/workflows/python-tests.yml/badge.svg)](https://github.com/Relais4x100a2/Recherche-job-par-candidature-spontanee/actions/workflows/python-tests.yml)
+
+
 # Recherche d'Entreprises pour Candidatures Spontanées
 
 Cette application Streamlit permet de rechercher des entreprises dans un rayon géographique donné autour d'une adresse, en filtrant par secteur d'activité (NAF) et tranche d'effectifs. Elle est conçue pour aider à la recherche d'entreprises cibles pour des candidatures spontanées.
