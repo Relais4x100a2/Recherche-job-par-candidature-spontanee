@@ -868,25 +868,49 @@ def generate_user_erm_excel(
             
             # --- Sheet 3: VALEURS_LISTE ---
             # Contains static lists from config.py for data validation dropdowns.
-            vl_headers = [
+            vl_headers_base = [ # Use a base list then append
                 "CONTACTS_Direction",
                 "ACTIONS_TypeAction",
                 "ACTIONS_StatutAction",
                 "ACTIONS_StatutOpportunuiteTaf",
             ]
-            vl_data_from_config = {
+            vl_data_from_config_base = {
                 "CONTACTS_Direction": config.VALEURS_LISTE_CONTACTS_DIRECTION,
                 "ACTIONS_TypeAction": config.VALEURS_LISTE_ACTIONS_TYPEACTION,
                 "ACTIONS_StatutAction": config.VALEURS_LISTE_ACTIONS_STATUTACTION,
                 "ACTIONS_StatutOpportunuiteTaf": config.VALEURS_LISTE_ACTIONS_STATUTOPPORTUNITE,
             }
-            max_len_vl = max(len(lst) for lst in vl_data_from_config.values())
+
+            final_vl_headers = list(vl_headers_base) # Make a copy
+            final_vl_data_from_config = dict(vl_data_from_config_base) # Make a copy
+
+            # Add "Statut Piste" to VALEURS_LISTE sheet
+            statut_piste_header_excel = "Statut Piste" # Column header in Excel as per user request
+            if hasattr(config, 'VALEURS_LISTE_ENTREPRISE_STATUTPISTE') and \
+               isinstance(config.VALEURS_LISTE_ENTREPRISE_STATUTPISTE, list):
+                final_vl_headers.append(statut_piste_header_excel)
+                final_vl_data_from_config[statut_piste_header_excel] = config.VALEURS_LISTE_ENTREPRISE_STATUTPISTE
+            else:
+                # Optional: Log a warning if VALEURS_LISTE_ENTREPRISE_STATUTPISTE is not found or not a list in config
+                print(f"Warning: config.VALEURS_LISTE_ENTREPRISE_STATUTPISTE not found or not a list. '{statut_piste_header_excel}' column not added to VALEURS_LISTE sheet.")
+
+            # Pad shorter lists with pd.NA to ensure equal length for DataFrame creation.
+            max_len_vl = 0
+            if final_vl_data_from_config: # Check if the dictionary is not empty
+                # Calculate max length only from actual lists
+                valid_lists = [lst for lst in final_vl_data_from_config.values() if isinstance(lst, list)]
+                if valid_lists:
+                    max_len_vl = max(len(lst) for lst in valid_lists)
+            
             padded_vl_data = {
-                col: lst + [pd.NA] * (max_len_vl - len(lst))
-                for col, lst in vl_data_from_config.items()
+                col_header: (final_vl_data_from_config.get(col_header, []) if isinstance(final_vl_data_from_config.get(col_header), list) else []) + 
+                            [pd.NA] * (max_len_vl - len(final_vl_data_from_config.get(col_header, []) if isinstance(final_vl_data_from_config.get(col_header), list) else []))
+                for col_header in final_vl_headers
             }
+
             df_valeurs_liste = pd.DataFrame(padded_vl_data)
-            df_valeurs_liste = df_valeurs_liste[vl_headers]
+            # Ensure column order based on final_vl_headers
+            df_valeurs_liste = df_valeurs_liste[final_vl_headers] 
             df_valeurs_liste.to_excel(
                 writer, sheet_name="VALEURS_LISTE", index=False, freeze_panes=(1, 0)
             )

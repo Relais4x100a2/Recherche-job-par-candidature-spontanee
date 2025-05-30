@@ -1051,8 +1051,87 @@ else:  # df_entreprises_erm is not empty
 # --- BOUTON DE TÉLÉCHARGEMENT ERM ---
 download_button_key = "download_user_erm_excel_button"
 try:
+    # Prepare df_entreprises_for_excel from st.session_state.df_entreprises_erm
+    # This ensures the Excel export has the correct columns, formatting, and excludes unwanted ones.
+    df_entreprises_for_excel = st.session_state.df_entreprises_erm.copy()
+
+    excel_column_order_core = [
+        "SIRET", "Dénomination - Enseigne", "LinkedIn", "Google Maps", "Indeed",
+        "Activité NAF/APE Etablissement", "Adresse établissement", "Commune",
+        "Nb salariés établissement", # This will be the formatted version
+        "Est siège social", "Date de création Entreprise",
+        "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise"
+    ]
+    # Define other desired columns that might come from config.ENTREPRISES_ERM_COLS
+    # and should appear after the core set.
+    desired_suffix_cols = ["Notes Personnelles", "Statut Piste"]
+
+    if not df_entreprises_for_excel.empty:
+        # 1. Ensure 'Effectif Numérique' for formatting (will be dropped before final Excel output)
+        if 'Code effectif établissement' in df_entreprises_for_excel.columns:
+            df_entreprises_for_excel['Effectif Numérique'] = df_entreprises_for_excel['Code effectif établissement'] \
+                .map(config.effectifs_numerical_mapping) \
+                .fillna(0)
+            df_entreprises_for_excel['Effectif Numérique'] = pd.to_numeric(df_entreprises_for_excel['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
+        elif 'Effectif Numérique' not in df_entreprises_for_excel.columns:
+            df_entreprises_for_excel['Effectif Numérique'] = 0 # Default if not present
+        else: # Exists, ensure type and fill NA
+             df_entreprises_for_excel['Effectif Numérique'] = pd.to_numeric(df_entreprises_for_excel['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
+
+        # 2. Format 'Nb salariés établissement'
+        if 'Effectif Numérique' in df_entreprises_for_excel.columns and 'Nb salariés établissement' in df_entreprises_for_excel.columns:
+            def format_effectif_for_excel(row):
+                num_val = row.get('Effectif Numérique')
+                text_val = row.get('Nb salariés établissement')
+                letter_prefix = ""
+                if pd.notna(num_val):
+                    try:
+                        num_val_int = int(num_val)
+                        letter_prefix = config.effectif_numeric_to_letter_prefix.get(num_val_int, "")
+                    except (ValueError, TypeError):
+                        pass # letter_prefix remains ""
+                text_upper = str(text_val).upper() if pd.notna(text_val) else "N/A"
+                return f"{letter_prefix} - {text_upper}" if letter_prefix else text_upper
+            df_entreprises_for_excel['Nb salariés établissement'] = df_entreprises_for_excel.apply(format_effectif_for_excel, axis=1)
+
+        # 3. Add link columns
+        if "Dénomination - Enseigne" in df_entreprises_for_excel.columns:
+            df_entreprises_for_excel["LinkedIn"] = df_entreprises_for_excel["Dénomination - Enseigne"].apply(
+                lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com" if pd.notna(x) and x.strip() != "" else None
+            )
+        if "Dénomination - Enseigne" in df_entreprises_for_excel.columns and "Adresse établissement" in df_entreprises_for_excel.columns:
+            df_entreprises_for_excel["Google Maps"] = df_entreprises_for_excel.apply(
+                lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
+                if pd.notna(row["Dénomination - Enseigne"]) and row["Dénomination - Enseigne"].strip() != "" and \
+                   pd.notna(row["Adresse établissement"]) and row["Adresse établissement"].strip() != ""
+                else None, axis=1
+            )
+            df_entreprises_for_excel["Indeed"] = df_entreprises_for_excel["Dénomination - Enseigne"].apply(
+                lambda x: f"https://www.google.com/search?q={x}+site%3Aindeed.com" if pd.notna(x) and x.strip() != "" else None
+            )
+        
+        # 4. Define final column list and select them
+        excel_column_order_suffix = []
+        for col_name in desired_suffix_cols:
+            if col_name in df_entreprises_for_excel.columns or col_name in config.ENTREPRISES_ERM_COLS:
+                 excel_column_order_suffix.append(col_name)
+
+        final_excel_columns = excel_column_order_core + excel_column_order_suffix
+        
+        # Ensure all defined Excel columns exist in the DataFrame, adding them with NA if not.
+        for col in final_excel_columns:
+            if col not in df_entreprises_for_excel.columns:
+                df_entreprises_for_excel[col] = pd.NA
+        
+        # Select only the desired columns in the specified order for the Excel sheet.
+        # This implicitly drops "Code effectif établissement", "Effectif Numérique", and any other unwanted columns.
+        df_entreprises_for_excel = df_entreprises_for_excel[final_excel_columns]
+    else: # df_entreprises_erm is empty, create an empty DataFrame with the correct Excel column structure
+        final_excel_columns_empty_case = excel_column_order_core + desired_suffix_cols
+        df_entreprises_for_excel = pd.DataFrame(columns=final_excel_columns_empty_case)
+
     user_erm_excel_data = data_utils.generate_user_erm_excel(
-        st.session_state.df_entreprises_erm,
+        df_entreprises_for_excel, # Pass the prepared DataFrame for the "Entreprises" sheet
         st.session_state.df_contacts_erm,
         st.session_state.df_actions_erm,
     )
