@@ -39,7 +39,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- ERM DATA HANDLING FUNCTIONS ---
+# --- ERM DATA HANDLING FUNCTIONS (REMOVED - Data is now session-only) ---
 def load_global_erm_data(file_path=config.DEFAULT_ERM_FILE_PATH):
     """
     Charges les données ERM (Entreprises, Contacts, Actions) depuis un fichier JSON global.
@@ -85,41 +85,32 @@ def load_global_erm_data(file_path=config.DEFAULT_ERM_FILE_PATH):
     # TODO: Apply similar dtype logic for df_c and df_a if CONTACTS_ERM_DTYPES and ACTIONS_ERM_DTYPES are defined in config.py
 
     
-    return df_e, df_c, df_a
+    # This function is no longer used. Initialization happens directly in session state.
+    # return df_e, df_c, df_a
+    pass
 
 def save_global_erm_data(df_e, df_c, df_a, file_path=config.DEFAULT_ERM_FILE_PATH):
     """
     Sauvegarde les DataFrames ERM (Entreprises, Contacts, Actions) dans un fichier JSON global.
     Convertit les DataFrames en dictionnaires, gérant les NaNs pour la sérialisation JSON.
     Utilise default=str pour gérer la sérialisation des objets datetime.
-    """
-    data_to_save = {
-        "entreprises": df_e.astype(object).where(pd.notnull(df_e), None).to_dict(orient="records"),
-        "contacts": df_c.astype(object).where(pd.notnull(df_c), None).to_dict(orient="records"),
-        "actions": df_a.astype(object).where(pd.notnull(df_a), None).to_dict(orient="records"),
-    }
-    try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data_to_save, f, indent=2, ensure_ascii=False, default=str)
-    except Exception as e:
-        st.error(f"Erreur lors de la sauvegarde des données ERM : {e}")
-
-# --- CALLBACKS FOR ERM DATA MODIFICATION ---
-def on_erm_data_changed():
-    """Callback pour sauvegarder les données ERM lorsque des modifications sont détectées."""
-    save_global_erm_data(st.session_state.get('df_entreprises_erm'), st.session_state.get('df_contacts_erm'), st.session_state.get('df_actions_erm'))
-
+    """    
+    # This function is no longer used. Data is not saved to a global file.
+    pass
 
 # --- INITIALISATION DE L'ÉTAT DE SESSION POUR L'AUTHENTIFICATION ET ERM ---
 # print(f"{datetime.datetime.now()} - INFO - Initializing session state variables.") # Optional: uncomment for runtime debugging
 # Initialisation des DataFrames ERM s'ils n'existent pas encore dans la session.
-# Sera rempli par load_global_erm_data plus tard.
 if "df_entreprises_erm" not in st.session_state:
     st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES)
 if "df_contacts_erm" not in st.session_state:
-    st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS) # Add .astype if dtypes defined
+    st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
+    if hasattr(config, 'CONTACTS_ERM_DTYPES') and isinstance(config.CONTACTS_ERM_DTYPES, dict) and config.CONTACTS_ERM_DTYPES:
+        st.session_state.df_contacts_erm = st.session_state.df_contacts_erm.astype(config.CONTACTS_ERM_DTYPES)
 if "df_actions_erm" not in st.session_state:
-    st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS) # Add .astype if dtypes defined
+    st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+    if hasattr(config, 'ACTIONS_ERM_DTYPES') and isinstance(config.ACTIONS_ERM_DTYPES, dict) and config.ACTIONS_ERM_DTYPES:
+        st.session_state.df_actions_erm = st.session_state.df_actions_erm.astype(config.ACTIONS_ERM_DTYPES)
 if "confirm_flush" not in st.session_state:
     st.session_state.confirm_flush = False
 if "editor_key_version" not in st.session_state:
@@ -131,6 +122,15 @@ if "search_coordinates" not in st.session_state:
 if "search_radius" not in st.session_state:
     st.session_state.search_radius = None
 
+# === NEW SESSION STATE VARIABLES FOR SEARCH HISTORY AND VISIBILITY ===
+if "past_searches" not in st.session_state:
+    st.session_state.past_searches = [] # List of dicts, each representing a search
+if "next_search_id" not in st.session_state:
+    st.session_state.next_search_id = 0
+if "global_show_all_searches" not in st.session_state:
+    st.session_state.global_show_all_searches = True # Default to showing all
+# === END NEW SESSION STATE VARIABLES ===
+
 # === NEW SESSION STATE VARIABLES FOR BREAKDOWN SEARCH ===
 if "show_breakdown_options" not in st.session_state:
     st.session_state.show_breakdown_options = False
@@ -139,6 +139,45 @@ if "breakdown_search_pending" not in st.session_state:
 if "original_search_context_for_breakdown" not in st.session_state:
     st.session_state.original_search_context_for_breakdown = None
 # === END NEW SESSION STATE VARIABLES ===
+
+
+# --- HELPER FUNCTION FOR VISIBLE ERM DATA ---
+def get_visible_erm_data():
+    """
+    Filters the main ERM DataFrame (st.session_state.df_entreprises_erm)
+    to include only companies from 'past_searches' marked as visible.
+    Returns a DataFrame.
+    """
+    if not st.session_state.get("past_searches") or st.session_state.df_entreprises_erm.empty:
+        # If no search history or ERM is empty, return an empty DataFrame with correct schema
+        return pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES)
+
+    active_sirets = set()
+    any_search_marked_visible = False
+    for search_item in st.session_state.past_searches:
+        if search_item.get("is_visible", True): # Default to True if 'is_visible' is missing for some reason
+            active_sirets.update(search_item.get("sirets_found", set()))
+            any_search_marked_visible = True
+
+    if not any_search_marked_visible or not active_sirets:
+        # If no searches are marked visible or no SIRETs collected, return empty
+        return pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES)
+
+    # Filter the main ERM DataFrame
+    df_visible = st.session_state.df_entreprises_erm[
+        st.session_state.df_entreprises_erm["SIRET"].isin(active_sirets)
+    ].copy()
+    return df_visible
+
+def create_search_params_description(adresse, radius, naf_sections, naf_specific_codes, effectifs_codes):
+    """Creates a human-readable description of the search parameters."""
+    params_desc_parts = [f"📍 {adresse[:25]}... ({radius}km)"]
+    if naf_specific_codes:
+        params_desc_parts.append(f"📂 {len(naf_specific_codes)} codes NAF spéc.")
+    elif naf_sections:
+        params_desc_parts.append(f"📂 Sections: {', '.join(naf_sections)}")
+    params_desc_parts.append(f"📊 {len(effectifs_codes)} tranches d'eff.")
+    return ", ".join(params_desc_parts)
 
 # --- GESTION DE L'ÉTAT DE SESSION POUR LES PARAMÈTRES DE RECHERCHE ---
 # Initialise les sélections par défaut pour les filtres NAF et effectifs
@@ -190,13 +229,6 @@ if data_utils.naf_detailed_lookup is None: # Check if loading was successful
         "Vérifiez la présence et le format du fichier NAF.csv. L'application ne peut pas continuer."   
     )
     st.stop()
-
-# --- Chargement des données ERM dans l'état de session ---
-if "erm_data_loaded" not in st.session_state:
-    st.session_state.df_entreprises_erm, \
-    st.session_state.df_contacts_erm, \
-    st.session_state.df_actions_erm = load_global_erm_data()
-    st.session_state.erm_data_loaded = True    
 
 col_gauche, col_droite = st.columns(2)
 
@@ -556,6 +588,26 @@ if lancer_recherche:
             st.session_state.search_coordinates = (lat_centre, lon_centre)
             st.session_state.search_radius = radius_input
 
+            # --- Track search in history ---
+            if not df_resultats.empty:
+                st.session_state.next_search_id += 1
+                search_id = st.session_state.next_search_id
+                sirets_in_this_query = set(df_resultats["SIRET"].unique())
+                
+                params_desc = create_search_params_description(
+                    adresse_input, radius_input, 
+                    st.session_state.selected_naf_letters, 
+                    st.session_state.selected_specific_naf_codes, 
+                    st.session_state.selected_effectifs_codes
+                )
+                new_search_entry = {
+                    "id": search_id, "timestamp": datetime.datetime.now(),
+                    "params_desc": params_desc, "sirets_found": sirets_in_this_query,
+                    "num_total_found_by_query": len(df_resultats), "is_visible": True,
+                }
+                st.session_state.past_searches.insert(0, new_search_entry)
+
+
             if not entreprises_trouvees_list: # API returned empty list
                  st.info("Aucune entreprise trouvée pour les critères spécifiés après la recherche complète.")
             elif df_resultats.empty and entreprises_trouvees_list: # API had results, but filtering by effectifs yielded none
@@ -590,7 +642,6 @@ if lancer_recherche:
                     st.session_state.df_entreprises_erm = pd.concat(
                         [st.session_state.df_entreprises_erm, df_to_add], ignore_index=True
                     ).reindex(columns=config.ENTREPRISES_ERM_COLS)
-                    on_erm_data_changed()
                     st.success(
                         f"{len(df_new_entreprises)} nouvelle(s) entreprise(s) automatiquement ajoutée(s) à votre ERM."
                     )
@@ -781,6 +832,22 @@ if st.session_state.get("breakdown_search_pending", False):
             st.session_state.search_coordinates = context.get("user_lat_lon") # Original center for map
             st.session_state.search_radius = context.get("user_radius") # Original radius for map context
             
+            # --- Track breakdown search in history ---
+            if not df_final_results.empty:
+                st.session_state.next_search_id += 1
+                search_id_bd = st.session_state.next_search_id
+                sirets_in_bd_query = set(df_final_results["SIRET"].unique())
+                # For breakdown, params_desc might be more complex or refer to the original broad search
+                params_desc_bd = f"Recherche décomposée (basée sur: {context.get('user_address','')[:25]}...)"
+                
+                new_search_entry_bd = {
+                    "id": search_id_bd, "timestamp": datetime.datetime.now(),
+                    "params_desc": params_desc_bd, "sirets_found": sirets_in_bd_query,
+                    "num_total_found_by_query": len(df_final_results), "is_visible": True,
+                }
+                st.session_state.past_searches.insert(0, new_search_entry_bd)
+
+
             # Add new results from breakdown to ERM
             if not df_final_results.empty:
                 if "SIRET" not in st.session_state.df_entreprises_erm.columns:
@@ -808,7 +875,6 @@ if st.session_state.get("breakdown_search_pending", False):
                     st.session_state.df_entreprises_erm = pd.concat(
                         [st.session_state.df_entreprises_erm, df_to_add_bd], ignore_index=True
                     ).reindex(columns=config.ENTREPRISES_ERM_COLS)
-                    on_erm_data_changed()
                     st.success(f"{len(df_new_entreprises_bd)} nouvelle(s) entreprise(s) issue(s) de la recherche décomposée ajoutée(s) à l'ERM.")
                     st.session_state.editor_key_version += 1
 
@@ -820,36 +886,144 @@ if st.session_state.get("breakdown_search_pending", False):
 
         st.rerun()
 
+# --- UI FOR MANAGING PAST SEARCHES ---
+with st.sidebar.expander("⚙️ Gérer l'historique et l'affichage des recherches", expanded=True):
+    if not st.session_state.past_searches:
+        st.caption("Aucune recherche dans l'historique.")
+    else:
+        # Toggle all visibility
+        # Check current state of all individual toggles to set the 'master' toggle
+        all_currently_visible_in_ui = all(s.get("is_visible", True) for s in st.session_state.past_searches)
+
+        def toggle_all_visibility_callback():
+            new_master_state = st.session_state.toggle_all_visibility_cb
+            for i in range(len(st.session_state.past_searches)):
+                st.session_state.past_searches[i]["is_visible"] = new_master_state
+            # No st.rerun() here, it's handled by Streamlit due to on_change
+
+        st.checkbox(
+            "Afficher/Masquer toutes les recherches",
+            value=all_currently_visible_in_ui,
+            key="toggle_all_visibility_cb",
+            on_change=toggle_all_visibility_callback,
+            help="Cochez pour afficher les résultats de toutes les recherches, décochez pour masquer."
+        )
+        st.markdown("---")
+
+        for search_item in st.session_state.past_searches:
+            search_id_hist = search_item["id"]
+            # Find the item in session_state by ID to ensure we're working with the current version
+            # This is important because st.rerun() might cause the list to be rebuilt if not careful
+            current_search_item_in_state = next((s for s in st.session_state.past_searches if s["id"] == search_id_hist), None)
+            if not current_search_item_in_state:
+                continue # Should not happen if list is managed correctly
+
+            item_is_visible = current_search_item_in_state.get("is_visible", True)
+
+            col_info, col_toggle, col_remove = st.columns([4,1,1])
+            with col_info:
+                st.markdown(
+                    f"<small>**Recherche {search_id_hist}** ({current_search_item_in_state['timestamp']:%d/%m %H:%M}):<br>"
+                    f"{current_search_item_in_state['params_desc']}<br>"
+                    f"({current_search_item_in_state['num_total_found_by_query']} résultats)</small>",
+                    unsafe_allow_html=True
+                )
+            
+            with col_toggle:
+                # Callback for individual toggle
+                def individual_toggle_callback(sid):
+                    for i_s_cb, s_cb_item in enumerate(st.session_state.past_searches):
+                        if s_cb_item["id"] == sid:
+                            st.session_state.past_searches[i_s_cb]["is_visible"] = st.session_state[f"visible_search_cb_{sid}"]
+                            break
+                
+                st.checkbox(
+                    "Afficher",
+                    value=item_is_visible,
+                    key=f"visible_search_cb_{search_id_hist}",
+                    label_visibility="collapsed",
+                    on_change=individual_toggle_callback,
+                    args=(search_id_hist,)
+                )
+
+            with col_remove:
+                if st.button("🗑️", key=f"remove_search_btn_{search_id_hist}", help="Oublier cette recherche et ses résultats uniques."):
+                    # --- Removal Logic ---
+                    search_to_remove_obj = None
+                    # Find the object to remove by its ID
+                    for s_obj_rem in st.session_state.past_searches:
+                        if s_obj_rem["id"] == search_id_hist:
+                            search_to_remove_obj = s_obj_rem
+                            break
+                    
+                    if search_to_remove_obj:
+                        sirets_from_removed_query = search_to_remove_obj.get("sirets_found", set())
+                        
+                        # Collect SIRETs from all *other remaining* searches
+                        sirets_from_other_remaining_queries = set()
+                        for other_s_rem in st.session_state.past_searches:
+                            if other_s_rem["id"] != search_id_hist: # Exclude the one being removed
+                                sirets_from_other_remaining_queries.update(other_s_rem.get("sirets_found", set()))
+                        
+                        # Determine SIRETs that were *only* found by the search being removed
+                        sirets_to_delete_from_erm_master = sirets_from_removed_query - sirets_from_other_remaining_queries
+                        
+                        # Remove these unique SIRETs from the master ERM DataFrame
+                        if sirets_to_delete_from_erm_master and not st.session_state.df_entreprises_erm.empty:
+                            st.session_state.df_entreprises_erm = st.session_state.df_entreprises_erm[
+                                ~st.session_state.df_entreprises_erm["SIRET"].isin(sirets_to_delete_from_erm_master)
+                            ]
+                            st.toast(f"{len(sirets_to_delete_from_erm_master)} entreprise(s) unique(s) à cette recherche ont été retirée(s) de l'ERM.")
+                        
+                        # Remove the search entry itself from past_searches
+                        st.session_state.past_searches = [s_f_rem for s_f_rem in st.session_state.past_searches if s_f_rem["id"] != search_id_hist]
+                        
+                        st.session_state.editor_key_version +=1 # if using data_editor for ERM
+                        st.rerun()
+            st.markdown("---")
+
+
 
 # --- AFFICHAGE PERSISTANT DES RÉSULTATS DE RECHERCHE (SI EXISTANTS) ---
 with results_container: # This container is now also used by breakdown logic for its messages
     # Check if there are results to display from session_state
     # This section will render after a normal search, or after a breakdown search completes.
     # It will also render if show_breakdown_options is true, but the map/table won't show then.
+    
+    # Determine what to display based on visible searches
+    # df_results_to_show_on_map_and_summary is based on the *last search that produced results*
+    # or could be an aggregation if we change that logic. For now, let's use st.session_state.df_search_results
+    # for the summary count and map centering, but the actual points on map come from get_visible_erm_data().
+        
     if not st.session_state.get("show_breakdown_options", False) and \
        not st.session_state.get("breakdown_search_pending", False) and \
-       st.session_state.df_search_results is not None:
+       st.session_state.search_coordinates is not None: # Check for coordinates as a proxy for a completed search display
 
-        if not st.session_state.df_search_results.empty and \
+        df_visible_for_map_and_summary = get_visible_erm_data()
+
+        if not df_visible_for_map_and_summary.empty and \
            st.session_state.search_coordinates is not None and \
            st.session_state.search_radius is not None:
             
             # Utiliser les variables de session pour afficher les résultats
-            df_search_results_display = st.session_state.df_search_results
+            # The summary count should reflect what's currently visible from all active searches
+            df_search_results_display_count = len(df_visible_for_map_and_summary)
+
             lat_centre_display, lon_centre_display = st.session_state.search_coordinates
             radius_display = st.session_state.search_radius
 
             st.success(
-                f"📊 {len(df_search_results_display)} établissements trouvés correspondant à tous les critères."
+            f"📊 {df_search_results_display_count} établissement(s) actuellement visible(s) sur la carte et dans l'ERM."
             )
 
             # Affichage Carte
             st.subheader("Carte des établissements trouvés")
-            df_map_display = df_search_results_display.dropna(
+            # Use the globally visible data for the map points
+            df_map_points = df_visible_for_map_and_summary.dropna(
                 subset=["Latitude", "Longitude", "Radius", "Color"]
             ).copy()
 
-            if not df_map_display.empty:
+            if not df_map_points.empty:
                 zoom_level = 11
                 if radius_display <= 1: zoom_level = 14
                 elif radius_display <= 5: zoom_level = 12
@@ -862,7 +1036,7 @@ with results_container: # This container is now also used by breakdown logic for
                     zoom=zoom_level, pitch=0, bearing=0,
                 )
                 layer = pdk.Layer(
-                    "ScatterplotLayer", data=df_map_display,
+                    "ScatterplotLayer", data=df_map_points,
                     get_position="[Longitude, Latitude]", get_color="Color", get_radius="Radius",
                     radius_min_pixels=3, radius_max_pixels=60,
                     pickable=True, auto_highlight=True,
@@ -899,8 +1073,8 @@ with results_container: # This container is now also used by breakdown logic for
                                 st.markdown(f"{circle_html} {label} ({group_details['label']})", unsafe_allow_html=True)
                 with cols_legende[1]:
                     st.markdown("**Couleur = Secteur d'activité**")
-                    if "Section NAF" in df_map_display.columns:
-                        sections_in_final_results = sorted(list(set(df_map_display["Section NAF"].unique()) - {"N/A"}))
+                    if "Section NAF" in df_map_points.columns:
+                        sections_in_final_results = sorted(list(set(df_map_points["Section NAF"].unique()) - {"N/A"}))
                         if not sections_in_final_results:
                             st.caption("Aucune section NAF trouvée dans les résultats.")
                         else:
@@ -919,44 +1093,46 @@ with results_container: # This container is now also used by breakdown logic for
             else: # df_map_display is empty
                 st.info("Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte.")
         
-        elif st.session_state.df_search_results is not None and st.session_state.df_search_results.empty:
-             # This case is for when a search (normal or breakdown) explicitly resulted in zero companies
-             # The messages for this are handled within the lancer_recherche or breakdown block.
-             # We can add a generic one here if needed, but it might be redundant.
-             # st.info("Votre recherche n'a retourné aucun établissement.")
-             pass
+        elif df_visible_for_map_and_summary.empty and st.session_state.past_searches:
+            st.info("Aucun établissement à afficher. Vérifiez les filtres de visibilité dans 'Gérer l'historique...' ou lancez une nouvelle recherche.")
+        elif not st.session_state.past_searches : # No searches yet, or all cleared
+            # This message is now handled by the ERM table display logic below if df_entreprises_erm is also empty
+            pass
 
 
 # --- AFFICHAGE DU TABLEAU ERM ---
 # Ce tableau affiche les entreprises stockées dans st.session_state.df_entreprises_erm.
-if st.session_state.df_entreprises_erm.empty:
+df_display_erm_filtered = get_visible_erm_data()
+
+if df_display_erm_filtered.empty:
     st.info(
-        "Aucune entreprise dans votre liste pour le moment. Lancez une recherche pour en ajouter."
+        "Aucune entreprise à afficher. Lancez une recherche pour en ajouter, "
+        "ou vérifiez les filtres de visibilité dans 'Gérer l'historique...'."
     )
         # The clear button is hidden if the table is already empty
 else:  # df_entreprises_erm is not empty
     st.subheader("Tableau des établissements trouvés")
 
     # Create a copy for display modifications
-    df_display_erm = st.session_state.df_entreprises_erm.copy()
+    df_display_erm_processed = df_display_erm_filtered.copy()
 
     # Assurer que 'Effectif Numérique' est correctement peuplé pour le formatage de l'affichage
     # et le tri potentiel (bien que le tri ne soit pas directement implémenté ici pour l'affichage).
-    if 'Code effectif établissement' in df_display_erm.columns:
-        df_display_erm['Effectif Numérique'] = df_display_erm['Code effectif établissement'] \
-            .map(config.effectifs_numerical_mapping) \
+    if 'Code effectif établissement' in df_display_erm_processed.columns:
+        df_display_erm_processed['Effectif Numérique'] = df_display_erm_processed['Code effectif établissement'] \
+           .map(config.effectifs_numerical_mapping) \
             .fillna(0) # Default to 0 if mapping fails or code is NA
         # Ensure it's integer type
-        df_display_erm['Effectif Numérique'] = pd.to_numeric(df_display_erm['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
-    elif 'Effectif Numérique' not in df_display_erm.columns:
+        df_display_erm_processed['Effectif Numérique'] = pd.to_numeric(df_display_erm_processed['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
+    elif 'Effectif Numérique' not in df_display_erm_processed.columns:
         # If 'Code effectif établissement' is also missing, and 'Effectif Numérique' is missing, create it with default
-        df_display_erm['Effectif Numérique'] = 0
+        df_display_erm_processed['Effectif Numérique'] = 0
     else:
         # If 'Effectif Numérique' exists but 'Code effectif établissement' does not, ensure it's the correct type and fill NAs
-        df_display_erm['Effectif Numérique'] = pd.to_numeric(df_display_erm['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
+        df_display_erm_processed['Effectif Numérique'] = pd.to_numeric(df_display_erm_processed['Effectif Numérique'], errors='coerce').fillna(0).astype(int)
 
 
-    if 'Effectif Numérique' in df_display_erm.columns and 'Nb salariés établissement' in df_display_erm.columns:
+    if 'Effectif Numérique' in df_display_erm_processed.columns and 'Nb salariés établissement' in df_display_erm_processed.columns:
         # Formate la colonne "Nb salariés établissement" pour l'affichage en préfixant avec une lettre basée sur l'effectif numérique.
         def format_effectif_for_display(row):
             num_val = row.get('Effectif Numérique') # Ex: 0, 1, 3, 10...
@@ -975,20 +1151,20 @@ else:  # df_entreprises_erm is not empty
 
             return f"{letter_prefix} - {text_upper}" if letter_prefix else text_upper
         
-        df_display_erm['Nb salariés établissement'] = df_display_erm.apply(format_effectif_for_display, axis=1)
+        df_display_erm_processed['Nb salariés établissement'] = df_display_erm_processed.apply(format_effectif_for_display, axis=1)
 
     # Génération des colonnes de liens pour LinkedIn, Google Maps, et Indeed.
-    if "Dénomination - Enseigne" in df_display_erm.columns:
-        df_display_erm["LinkedIn"] = df_display_erm["Dénomination - Enseigne"].apply(
+    if "Dénomination - Enseigne" in df_display_erm_processed.columns:
+        df_display_erm_processed["LinkedIn"] = df_display_erm_processed["Dénomination - Enseigne"].apply(
             lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com"
             if pd.notna(x) and x.strip() != "" 
             else None
         )
     if (
-        "Dénomination - Enseigne" in df_display_erm.columns
-        and "Adresse établissement" in df_display_erm.columns
+        "Dénomination - Enseigne" in df_display_erm_processed.columns
+        and "Adresse établissement" in df_display_erm_processed.columns
     ):
-        df_display_erm["Google Maps"] = df_display_erm.apply(
+        df_display_erm_processed["Google Maps"] = df_display_erm_processed.apply(
             lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
             if pd.notna(row["Dénomination - Enseigne"])
             and row["Dénomination - Enseigne"].strip() != ""
@@ -997,8 +1173,8 @@ else:  # df_entreprises_erm is not empty
             else None,
             axis=1,
         )
-        if "Dénomination - Enseigne" in df_display_erm.columns:
-            df_display_erm["Indeed"] = df_display_erm[
+        if "Dénomination - Enseigne" in df_display_erm_processed.columns:
+            df_display_erm_processed["Indeed"] = df_display_erm_processed[
                 "Dénomination - Enseigne"
             ].apply(
                 lambda x: f"https://www.google.com/search?q={x}+site%3Aindeed.com"
@@ -1018,15 +1194,15 @@ else:  # df_entreprises_erm is not empty
     
     # Insert link columns at a specific position
     link_insert_index = cols_to_display_erm_tab.index("Dénomination - Enseigne") + 1
-    if "Indeed" in df_display_erm.columns and "Indeed" not in cols_to_display_erm_tab:
+    if "Indeed" in df_display_erm_processed.columns and "Indeed" not in cols_to_display_erm_tab:
         cols_to_display_erm_tab.insert(link_insert_index, "Indeed")
-    if "Google Maps" in df_display_erm.columns and "Google Maps" not in cols_to_display_erm_tab:
+    if "Google Maps" in df_display_erm_processed.columns and "Google Maps" not in cols_to_display_erm_tab:
         cols_to_display_erm_tab.insert(link_insert_index, "Google Maps")
-    if "LinkedIn" in df_display_erm.columns and "LinkedIn" not in cols_to_display_erm_tab:
+    if "LinkedIn" in df_display_erm_processed.columns and "LinkedIn" not in cols_to_display_erm_tab:
         cols_to_display_erm_tab.insert(link_insert_index, "LinkedIn")
 
     cols_existantes_in_display_tab = [
-        col for col in cols_to_display_erm_tab if col in df_display_erm.columns
+        col for col in cols_to_display_erm_tab if col in df_display_erm_processed.columns
     ]
 
     # Configuration des colonnes pour st.dataframe, incluant les types de colonnes et les labels.
@@ -1042,7 +1218,7 @@ else:  # df_entreprises_erm is not empty
     }
 
     st.dataframe(
-        df_display_erm[cols_existantes_in_display_tab],
+        df_display_erm_processed[cols_existantes_in_display_tab],
         column_config=column_config_map,
         hide_index=True,
         use_container_width=True,
@@ -1052,8 +1228,8 @@ else:  # df_entreprises_erm is not empty
 download_button_key = "download_user_erm_excel_button"
 try:
     # Prepare df_entreprises_for_excel from st.session_state.df_entreprises_erm
-    # This ensures the Excel export has the correct columns, formatting, and excludes unwanted ones.
-    df_entreprises_for_excel = st.session_state.df_entreprises_erm.copy()
+    # Now, it should download the VISIBLE ERM data.
+    df_entreprises_for_excel = get_visible_erm_data() # Use the filtered data
 
     excel_column_order_core = [
         "SIRET", "Dénomination - Enseigne", "LinkedIn", "Google Maps", "Indeed",
@@ -1066,7 +1242,7 @@ try:
     # and should appear after the core set.
     desired_suffix_cols = ["Notes Personnelles", "Statut Piste"]
 
-    if not df_entreprises_for_excel.empty:
+    if not st.session_state.df_entreprises_erm.empty or st.session_state.past_searches:
         # 1. Ensure 'Effectif Numérique' for formatting (will be dropped before final Excel output)
         if 'Code effectif établissement' in df_entreprises_for_excel.columns:
             df_entreprises_for_excel['Effectif Numérique'] = df_entreprises_for_excel['Code effectif établissement'] \
@@ -1150,13 +1326,15 @@ st.markdown("---")
 # --- Bouton pour effacer le tableau des établissements ---
 if not st.session_state.df_entreprises_erm.empty:
     with st.expander("Zone de danger", expanded=True):
-        st.warning("Attention : Cette action effacera **toutes** les entreprises actuellement affichées dans le tableau.")
-        if st.button("🗑️ Effacer le tableau des établissements", key="clear_table_button_in_danger_zone"): # Ajout d'une clé unique
+        st.warning("Attention : Cette action effacera **toutes** les entreprises de l'ERM et l'historique des recherches.")
+        if st.button("🗑️ Effacer toutes les données (ERM et Historique)", key="clear_all_data_button"):
             st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES) # Réinitialise avec dtypes
             # Optionnel: effacer aussi contacts et actions si liés, ou laisser pour une gestion manuelle
             # st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
             # st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
-            on_erm_data_changed() # Sauvegarder le fait que c'est vide
-            st.session_state.editor_key_version += 1 # Increment key to force editor refresh if it were used
-            st.session_state.df_search_results = None # Clear search results display as well
+            
+            # Clear search history
+            st.session_state.past_searches = []
+            st.session_state.next_search_id = 0
+
             st.rerun() # Rerun to update the display immediately

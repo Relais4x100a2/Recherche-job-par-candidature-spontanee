@@ -36,6 +36,11 @@ ENTREPRISES_ERM_COLS = [
     "Année Finances Entreprise",
     "Notes Personnelles",  # User-editable notes for an enterprise.
     "Statut Piste",        # User-editable status for an enterprise lead.
+    "Latitude",            # Latitude for map display
+    "Section NAF",         # NAF Section for map legend and filtering
+    "Longitude",           # Longitude for map display
+    "Radius",              # Radius for map point size
+    "Color",               # Color for map point
 ]
 
 ENTREPRISES_ERM_DTYPES = {
@@ -54,6 +59,11 @@ ENTREPRISES_ERM_DTYPES = {
     "Année Finances Entreprise": pd.StringDtype(),
     "Notes Personnelles": pd.StringDtype(),
     "Statut Piste": pd.StringDtype(),
+    "Latitude": pd.Float64Dtype(),
+    "Section NAF": pd.StringDtype(),
+    "Longitude": pd.Float64Dtype(),
+    "Radius": pd.Int64Dtype(), # Assuming radius is an integer pixel value
+    "Color": object,           # Color is a list of [R,G,B], so object dtype
 }
 
 
