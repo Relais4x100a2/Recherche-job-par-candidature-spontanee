@@ -4,3 +4,5 @@ pandas
 geopy
 pydeck
 openpyxl
+openai
+pydantic

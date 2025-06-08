@@ -9,6 +9,7 @@ import api_client
 import config
 import data_utils
 import geo_utils
+import llm_utils
 
 # --- SCRIPT START LOG ---
 # print(f"{datetime.datetime.now()} - INFO - app.py script started.") # Optional: uncomment for runtime debugging
@@ -138,6 +139,8 @@ if "breakdown_search_pending" not in st.session_state:
     st.session_state.breakdown_search_pending = False
 if "original_search_context_for_breakdown" not in st.session_state:
     st.session_state.original_search_context_for_breakdown = None
+if "last_ia_summary" not in st.session_state: # Pour stocker le dernier résumé de l'IA
+    st.session_state.last_ia_summary = None
 # === END NEW SESSION STATE VARIABLES ===
 
 
@@ -171,12 +174,27 @@ def get_visible_erm_data():
 
 def create_search_params_description(adresse, radius, naf_sections, naf_specific_codes, effectifs_codes):
     """Creates a human-readable description of the search parameters."""
+    # naf_sections is a list of letters, naf_specific_codes is a set
     params_desc_parts = [f"📍 {adresse[:25]}... ({radius}km)"]
-    if naf_specific_codes:
-        params_desc_parts.append(f"📂 {len(naf_specific_codes)} codes NAF spéc.")
-    elif naf_sections:
-        params_desc_parts.append(f"📂 Sections: {', '.join(naf_sections)}")
+    
+    # Sections part
+    if naf_sections: 
+        section_descs_short = []
+        for s_letter in naf_sections:
+            s_detail = config.naf_sections_details.get(s_letter, {}).get("description", s_letter)
+            s_desc_short = s_detail.split(',')[0] 
+            if len(s_desc_short) > 20: s_desc_short = s_desc_short[:17] + "..."
+            section_descs_short.append(f"{s_letter}({s_desc_short})")
+        
+        if len(section_descs_short) > 2:
+            params_desc_parts.append(f"📂 {len(section_descs_short)} sections (ex: {', '.join(section_descs_short[:2])}...)")
+        else:
+            params_desc_parts.append(f"📂 Sections: {', '.join(section_descs_short)}")
+
     params_desc_parts.append(f"📊 {len(effectifs_codes)} tranches d'eff.")
+    # Specific codes part (if any were used for filtering) - Appended after effectifs for clarity
+    if naf_specific_codes: 
+        params_desc_parts.append(f"🏷️ Affiné par {len(naf_specific_codes)} codes spéc.")
     return ", ".join(params_desc_parts)
 
 # --- GESTION DE L'ÉTAT DE SESSION POUR LES PARAMÈTRES DE RECHERCHE ---
@@ -184,14 +202,22 @@ def create_search_params_description(adresse, radius, naf_sections, naf_specific
 # si elles ne sont pas déjà présentes dans l'état de session.
 # --- TITRE ET DESCRIPTION (Toujours visible) ---
 st.title(
-    "🔎 Application de recherche d'employeurs potentiels pour candidatures spontanées"
+    ":blue[Demande à Manu]*"
 )
+st.subheader(
+    "Application de recherche d'employeurs potentiels pour candidatures spontanées"
+)
+
 st.markdown(
-    "Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés."
+    """
+    Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés.\n  
+    _**(*) Je traverse la route et je vous trouve un travail !**_ Vous n'avez pas la réf. ? Revoyez <a href="https://www.youtube.com/watch?v=FHMy6DhOXrI" target="_blank">la vidéo </a> ou consultez la page <a href="https://fr.wikipedia.org/wiki/Je_traverse_la_rue_et_je_vous_trouve_un_travail" target="_blank">Wikipedia</a>.
+    """,
+    unsafe_allow_html=True
 )
 
 
-st.header("Paramètres de recherche")
+st.header("🔎 Paramètres de recherche")
 
 # --- Gestion état session pour les filtres de recherche ---
 if "selected_naf_letters" not in st.session_state:
@@ -254,6 +280,57 @@ with col_gauche:
             format="%.1f",
         )
 
+    # --- SECTION POUR L'ASSISTANT IA ---
+    st.subheader("💡 Assistant IA pour définir les critères de recherche")
+    st.caption("Décrivez le type d'entreprise (secteur d'activités, taille effectif) et le poste que vous recherchez, et l'IA tentera de présélectionner les secteurs et tailles d'effectifs.")
+    ia_text_input = st.text_area(
+        "Votre description pour l'IA :",
+        placeholder="Ex: Un poste de Lead Dev dans une startup.",
+        key="ia_text_input_description",
+        height=100
+    )
+
+    if st.button("🤖 Obtenir des suggestions de l'IA", key="ia_suggest_button", use_container_width=True):
+        # Effacer le résumé précédent avant de générer un nouveau
+        st.session_state.last_ia_summary = None
+
+        if ia_text_input and ia_text_input.strip():
+            # Pass necessary config details to the LLM utility
+            # For specific NAF codes validation, pass a list of all valid codes from NAF.csv
+            all_naf_codes_list = list(data_utils.naf_detailed_lookup.keys()) if data_utils.naf_detailed_lookup else None
+            
+            suggestions, summary_ia = llm_utils.get_llm_suggestions(
+                ia_text_input,
+                config.naf_sections_details,
+                config.effectifs_groupes_details,
+                all_specific_naf_codes=all_naf_codes_list,
+                naf_detailed_lookup_for_libelles=data_utils.naf_detailed_lookup,
+                effectifs_tranches_map_for_summary=config.effectifs_tranches
+            )
+
+            if suggestions:
+                if suggestions.get("naf_sections"):
+                    st.session_state.selected_naf_letters = suggestions["naf_sections"]
+                if suggestions.get("naf_specific_codes"): # LLM might suggest specific codes
+                    st.session_state.selected_specific_naf_codes = set(suggestions["naf_specific_codes"])
+                if suggestions.get("effectifs_codes"):
+                    st.session_state.selected_effectifs_codes = suggestions["effectifs_codes"]
+                
+                st.toast("Suggestions de l'IA appliquées aux filtres !", icon="👍") # Toast court pour confirmation
+                if summary_ia:
+                    st.session_state.last_ia_summary = summary_ia # Stocker pour affichage persistant
+                st.rerun()
+        else:
+            st.warning("Veuillez entrer une description pour que l'assistant IA puisse vous aider.")
+
+    # Affichage du dernier résumé de l'IA s'il existe
+    if st.session_state.last_ia_summary:
+        st.markdown("---")
+        st.info(st.session_state.last_ia_summary, icon="🤖")
+        st.markdown("---")
+
+
+with col_droite:
     st.subheader("📊 Tranches d'effectifs salariés (Établissement)")
 
     def on_effectif_change(group_key_arg, codes_in_group_arg):
@@ -289,8 +366,6 @@ with col_gauche:
                 args=(group_key, details["codes"]),
             )
         col_idx_eff += 1
-
-with col_droite:
     st.subheader("📂 Secteurs d'activité NAF")
     st.caption(
         "Sélectionnez les sections larges. Vous pourrez affiner par codes spécifiques ci-dessous (optionnel)."
@@ -445,6 +520,7 @@ if lancer_recherche:
     results_container.empty()  # Nettoyer les anciens messages/résultats dans ce conteneur
     st.session_state.show_breakdown_options = False # Reset flag
     st.session_state.breakdown_search_pending = False # Reset flag
+    st.session_state.last_ia_summary = None # Effacer le résumé de l'IA lors d'une nouvelle recherche principale
     st.session_state.df_search_results = None # Clear previous results display
 
     # --- Address Check ---
@@ -460,45 +536,7 @@ if lancer_recherche:
     has_selected_sections = bool(st.session_state.selected_naf_letters)
     has_selected_specific_codes = bool(st.session_state.selected_specific_naf_codes)
 
-    if not has_selected_sections:
-        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: No NAF sections selected.")
-        # If no sections are selected, specific codes cannot be valid (as they are filtered by section in the UI callbacks)
-        # on_section_change should clear selected_specific_naf_codes if selected_naf_letters becomes empty.
-        st.error("⚠️ Veuillez sélectionner au moins une section NAF.")
-        st.stop()
-
-    if has_selected_specific_codes:
-        # User has chosen specific NAF codes. These take precedence.
-        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Using specific NAF codes.")
-        # st.session_state.selected_specific_naf_codes is already filtered by selected sections due to on_section_change.
-        codes_to_use = sorted(list(st.session_state.selected_specific_naf_codes))
-        
-        if not codes_to_use:
-            # This can happen if selected_specific_naf_codes was non-empty but then all its codes were removed
-            # (e.g., by deselecting their parent sections), making it empty.
-            # Fallback to pure section search if sections are still selected.
-            # has_selected_sections should be true here if we passed the first check.
-            sections_for_api = sorted(list(st.session_state.selected_naf_letters))
-            final_api_params["section_activite_principale"] = ",".join(sections_for_api)
-            
-            section_descs = [f"{s} ({config.naf_sections_details.get(s, {}).get('description', 'Section')})" for s in sections_for_api]
-            if len(section_descs) == 1:
-                naf_criteria_message_part = f"la section NAF : {section_descs[0]}"
-            else:
-                naf_criteria_message_part = f"les sections NAF : {', '.join(section_descs)}"
-        else:
-            final_api_params["activite_principale"] = ",".join(codes_to_use)
-            if len(codes_to_use) == 1:
-                naf_criteria_message_part = f"le code NAF spécifique : {codes_to_use[0]}"
-            else:
-                display_codes = codes_to_use
-                if len(display_codes) > 3: # Show first 3 and "..."
-                    display_codes = display_codes[:3] + ["..."]
-                naf_criteria_message_part = f"{len(codes_to_use)} codes NAF spécifiques (ex: {', '.join(display_codes)})"
-    
-    elif has_selected_sections: # And not has_selected_specific_codes
-        # Purely section-based search
-        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Using NAF sections.")
+    if has_selected_sections:
         sections_for_api = sorted(list(st.session_state.selected_naf_letters))
         final_api_params["section_activite_principale"] = ",".join(sections_for_api)
         
@@ -507,10 +545,20 @@ if lancer_recherche:
             naf_criteria_message_part = f"la section NAF : {section_descs[0]}"
         else:
             naf_criteria_message_part = f"les sections NAF : {', '.join(section_descs)}"
-    else:
-        # This case (no sections, no specific codes) is caught by the initial `if not has_selected_sections:`
-        # print(f"{datetime.datetime.now()} - DEBUG - Lancer recherche: Invalid NAF criteria (no sections/codes).")
-        st.error("⚠️ Veuillez sélectionner des critères NAF valides.")
+        
+        if has_selected_specific_codes:
+            # Specific codes will be used for client-side filtering
+            codes_to_filter_client_side = sorted(list(st.session_state.selected_specific_naf_codes))
+            if codes_to_filter_client_side: # Ensure there are actually codes to filter by
+                if len(codes_to_filter_client_side) == 1:
+                    naf_criteria_message_part += f", qui sera affiné par le code NAF spécifique : {codes_to_filter_client_side[0]}"
+                else:
+                    display_codes_specific = codes_to_filter_client_side
+                    if len(display_codes_specific) > 3:
+                        display_codes_specific = display_codes_specific[:3] + ["..."]
+                    naf_criteria_message_part += f", qui sera affiné par {len(codes_to_filter_client_side)} codes NAF spécifiques (ex: {', '.join(display_codes_specific)})"
+    else: # No sections selected
+        st.error("⚠️ Veuillez sélectionner au moins une section NAF.")
         st.stop()
 
     # Check for effectifs selection (common to all NAF paths)
@@ -583,6 +631,23 @@ if lancer_recherche:
             df_resultats = data_utils.traitement_reponse_api( # This function filters by effectifs again, which is fine as a safeguard
                 entreprises_trouvees_list, st.session_state.selected_effectifs_codes
             )
+
+            # --- Client-side filtering by specific NAF codes if selected ---
+            if has_selected_specific_codes and not df_resultats.empty:
+                codes_to_filter_client_side = sorted(list(st.session_state.selected_specific_naf_codes))
+                if codes_to_filter_client_side: 
+                    if 'code_naf_etablissement' in df_resultats.columns:
+                        original_count = len(df_resultats)
+                        df_resultats = df_resultats[df_resultats['code_naf_etablissement'].isin(codes_to_filter_client_side)]
+                        filtered_count = len(df_resultats)
+                        if original_count > 0 and filtered_count < original_count :
+                             st.info(f"Résultats initiaux ({original_count}) basés sur les sections NAF ont été affinés à {filtered_count} établissements en utilisant les codes NAF spécifiques sélectionnés.")
+                        elif original_count > 0 and filtered_count == 0 and original_count > filtered_count: # Ensure message only if filtering actually happened and resulted in zero
+                            st.info(f"Aucun des {original_count} établissements trouvés pour les sections NAF ne correspond aux codes NAF spécifiques sélectionnés.")
+                        # If filtered_count == original_count, no message needed as filtering had no effect.
+                    else:
+                        st.warning("Impossible d'affiner par codes NAF spécifiques : colonne 'code_naf_etablissement' manquante dans les résultats.")
+
 
             st.session_state.df_search_results = df_resultats.copy() if not df_resultats.empty else pd.DataFrame()
             st.session_state.search_coordinates = (lat_centre, lon_centre)
@@ -828,6 +893,20 @@ if st.session_state.get("breakdown_search_pending", False):
                 deduplicated_entreprise_list_bd, 
                 st.session_state.selected_effectifs_codes # This is now mostly for data transformation, not primary filtering
             )
+
+            # --- Client-side filtering for breakdown results by specific NAF codes ---
+            if not df_final_results.empty and st.session_state.selected_specific_naf_codes:
+                codes_to_filter_client_side_bd = sorted(list(st.session_state.selected_specific_naf_codes))
+                if codes_to_filter_client_side_bd:
+                    if 'code_naf_etablissement' in df_final_results.columns:
+                        original_count_bd = len(df_final_results)
+                        df_final_results = df_final_results[df_final_results['code_naf_etablissement'].isin(codes_to_filter_client_side_bd)]
+                        filtered_count_bd = len(df_final_results)
+                        if original_count_bd > filtered_count_bd : # Only show if filtering changed something
+                            st.info(f"Résultats de la recherche décomposée ({original_count_bd}) affinés à {filtered_count_bd} par codes NAF spécifiques.")
+                    else:
+                        st.warning("Recherche décomposée: Colonne 'code_naf_etablissement' manquante, impossible d'affiner par codes NAF spécifiques.")
+
             st.session_state.df_search_results = df_final_results.copy() if not df_final_results.empty else pd.DataFrame()
             st.session_state.search_coordinates = context.get("user_lat_lon") # Original center for map
             st.session_state.search_radius = context.get("user_radius") # Original radius for map context

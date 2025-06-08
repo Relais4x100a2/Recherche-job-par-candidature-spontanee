@@ -1,6 +1,7 @@
 venv/
 .idea/
 .devcontainer/
+.streamlit/
 __pycache__/
 
 
