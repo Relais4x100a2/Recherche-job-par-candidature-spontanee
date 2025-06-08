@@ -142,6 +142,13 @@ if "original_search_context_for_breakdown" not in st.session_state:
 if "last_ia_summary" not in st.session_state: # Pour stocker le dernier résumé de l'IA
     st.session_state.last_ia_summary = None
 # === END NEW SESSION STATE VARIABLES ===
+# === NEW SESSION STATE VARIABLES FOR AI SUGGESTION CHOICE ===
+if "ai_suggested_naf_sections" not in st.session_state:
+    st.session_state.ai_suggested_naf_sections = None
+if "ai_suggested_specific_codes" not in st.session_state:
+    st.session_state.ai_suggested_specific_codes = None
+if "ai_suggestion_choice_pending" not in st.session_state:
+    st.session_state.ai_suggestion_choice_pending = False
 
 
 # --- HELPER FUNCTION FOR VISIBLE ERM DATA ---
@@ -292,7 +299,9 @@ with col_gauche:
 
     if st.button("🤖 Obtenir des suggestions de l'IA", key="ia_suggest_button", use_container_width=True):
         # Effacer le résumé précédent avant de générer un nouveau
+        # Et réinitialiser l'état de choix des suggestions précédentes
         st.session_state.last_ia_summary = None
+        st.session_state.ai_suggestion_choice_pending = False
 
         if ia_text_input and ia_text_input.strip():
             # Pass necessary config details to the LLM utility
@@ -309,25 +318,61 @@ with col_gauche:
             )
 
             if suggestions:
-                if suggestions.get("naf_sections"):
-                    st.session_state.selected_naf_letters = suggestions["naf_sections"]
-                if suggestions.get("naf_specific_codes"): # LLM might suggest specific codes
-                    st.session_state.selected_specific_naf_codes = set(suggestions["naf_specific_codes"])
+                st.session_state.last_ia_summary = summary_ia # Stocker pour affichage
+
+                # Toujours appliquer les effectifs directement s'ils sont suggérés
                 if suggestions.get("effectifs_codes"):
                     st.session_state.selected_effectifs_codes = suggestions["effectifs_codes"]
-                
-                st.toast("Suggestions de l'IA appliquées aux filtres !", icon="👍") # Toast court pour confirmation
-                if summary_ia:
-                    st.session_state.last_ia_summary = summary_ia # Stocker pour affichage persistant
+
+                ai_naf_sections = suggestions.get("naf_sections", [])
+                ai_specific_codes = suggestions.get("naf_specific_codes", [])
+
+                if ai_naf_sections and ai_specific_codes: # Les deux listes sont non vides
+                    # Les deux types de suggestions NAF sont présents, stocker et demander le choix à l'utilisateur
+                    st.session_state.ai_suggested_naf_sections = ai_naf_sections
+                    st.session_state.ai_suggested_specific_codes = ai_specific_codes
+                    st.session_state.ai_suggestion_choice_pending = True
+                    st.toast("Suggestions de l'IA reçues. Veuillez choisir comment les appliquer.", icon="🤔")
+                elif ai_naf_sections: # Seulement les sections NAF sont suggérées (ou codes spécifiques est vide)
+                    st.session_state.selected_naf_letters = ai_naf_sections
+                    st.session_state.selected_specific_naf_codes = set() # Effacer les codes spécifiques précédents
+                    st.session_state.ai_suggestion_choice_pending = False
+                    st.toast("Secteurs NAF suggérés par l'IA appliqués.", icon="👍")
+                # Si seulement ai_specific_codes est présent (peu probable avec le prompt actuel),
+                # ou si aucun des deux n'est présent, ai_suggestion_choice_pending reste False.
+                # Un toast pour les effectifs seuls sera affiché si c'est le seul changement.
+                elif not ai_naf_sections and not ai_specific_codes and suggestions.get("effectifs_codes"):
+                     st.toast("Tranches d'effectifs suggérées par l'IA appliquées.", icon="👍")
+                elif not ai_naf_sections and not ai_specific_codes and not suggestions.get("effectifs_codes"):
+                    st.info("L'IA n'a pas pu extraire de nouveaux critères pertinents.")
+
                 st.rerun()
         else:
             st.warning("Veuillez entrer une description pour que l'assistant IA puisse vous aider.")
+            st.session_state.ai_suggestion_choice_pending = False # Assurer la réinitialisation
 
-    # Affichage du dernier résumé de l'IA s'il existe
+    # Affichage du dernier résumé de l'IA et des options de choix si nécessaire
     if st.session_state.last_ia_summary:
         st.markdown("---")
         st.info(st.session_state.last_ia_summary, icon="🤖")
-        st.markdown("---")
+        if st.session_state.get("ai_suggestion_choice_pending", False):
+            st.markdown("**Comment souhaitez-vous appliquer les suggestions NAF de l'IA ?**")
+            col_choice1, col_choice2 = st.columns(2)
+            with col_choice1:
+                if st.button("Appliquer Secteurs NAF Uniquement", key="apply_sections_only", use_container_width=True):
+                    st.session_state.selected_naf_letters = st.session_state.ai_suggested_naf_sections
+                    st.session_state.selected_specific_naf_codes = set() # Effacer les codes spécifiques
+                    st.session_state.ai_suggestion_choice_pending = False
+                    st.toast("Secteurs NAF suggérés par l'IA appliqués.", icon="👍")
+                    st.rerun()
+            with col_choice2:
+                if st.button("Appliquer Secteurs ET Codes Spécifiques", key="apply_sections_and_specific", use_container_width=True):
+                    st.session_state.selected_naf_letters = st.session_state.ai_suggested_naf_sections
+                    st.session_state.selected_specific_naf_codes = set(st.session_state.ai_suggested_specific_codes)
+                    st.session_state.ai_suggestion_choice_pending = False
+                    st.toast("Secteurs NAF et codes spécifiques suggérés par l'IA appliqués.", icon="👍")
+                    st.rerun()
+        st.markdown("---") # Séparateur après le bloc IA
 
 
 with col_droite:
@@ -520,6 +565,7 @@ if lancer_recherche:
     results_container.empty()  # Nettoyer les anciens messages/résultats dans ce conteneur
     st.session_state.show_breakdown_options = False # Reset flag
     st.session_state.breakdown_search_pending = False # Reset flag
+    # Effacer le résumé de l'IA et l'état de choix lors d'une nouvelle recherche principale, SAUF si la recherche est initiée par un choix de l'IA
     st.session_state.last_ia_summary = None # Effacer le résumé de l'IA lors d'une nouvelle recherche principale
     st.session_state.df_search_results = None # Clear previous results display
 

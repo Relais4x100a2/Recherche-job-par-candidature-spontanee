@@ -92,6 +92,20 @@ Veuillez retourner votre réponse UNIQUEMENT sous forme d'objet JSON avec la str
   "effectifs_codes": ["LISTE_DES_CODES_DE_TRANCHES_EFFECTIFS"]
 }}
 
+---
+**Règles d'interprétation supplémentaires :**
+
+* **Taille d'effectifs (exclusion des petites structures par défaut) :**
+    * **NE PAS inclure** les codes d'effectifs correspondant aux "0 salarié" et "1 à 9 salariés" par défaut.
+    * **Incluez ces petits effectifs UNIQUEMENT si l'utilisateur mentionne explicitement des termes comme** "startup", "nouvelle entreprise", "petite entreprise", "TPE", "indépendant", "freelance", ou si le **contexte du poste ou du secteur** d'activité suggère fortement des structures de très petite taille (par exemple, "artisanat", "consultant indépendant", "micro-entreprise").
+
+* **Déduction des secteurs (quand seul le poste est mentionné) :**
+    * Si l'utilisateur ne mentionne qu'un métier sans secteur d'activité, analysez la nature du poste.
+    * **Si le poste est générique et peut s'appliquer à une multitude de secteurs** (ex: "comptable", "assistant(e) de direction", "responsable marketing"), et qu'aucune indication de petite taille n'est donnée (moins de 10 personnes), **NE PAS restreindre les `naf_sections` ou `naf_specific_codes` à un petit ensemble**. Réfléchissez à une large gamme de secteurs pertinents pour un tel poste dans des entreprises de taille plus significative.
+    * **Si le poste est très spécifique à un ou quelques secteurs/codes NAF** (ex: "soudeur", "œnologue", "développeur front-end"), alors identifiez les `naf_sections` et `naf_specific_codes` correspondants. Essaie néanmoins d'être le plus large possible.
+
+---
+
 Exemple de description utilisateur : "Je cherche des PME dans le développement logiciel et le conseil informatique."
 Exemple de sortie JSON attendue :
 {{
@@ -112,7 +126,7 @@ N'incluez aucune explication ou texte en dehors de l'objet JSON.
                     "HTTP-Referer": HTTP_REFERER,
                     "X-Title": X_TITLE,
                 },
-                model=LLM_MODEL,
+                model="google/gemma-3-27b-it:free",
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_text_prompt}
