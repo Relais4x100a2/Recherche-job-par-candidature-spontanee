@@ -1153,17 +1153,38 @@ else:  # df_entreprises_erm is not empty
         
         df_display_erm_processed['Nb salariés établissement'] = df_display_erm_processed.apply(format_effectif_for_display, axis=1)
 
-    # Génération des colonnes de liens pour LinkedIn, Google Maps, et Indeed.
-    if "Dénomination - Enseigne" in df_display_erm_processed.columns:
-        df_display_erm_processed["LinkedIn"] = df_display_erm_processed["Dénomination - Enseigne"].apply(
-            lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com"
-            if pd.notna(x) and x.strip() != "" 
-            else None
+    # Helper function to generate Google search URLs
+    def generate_google_search_url(name, location_param, term, use_site_specific=False):
+        if pd.isna(name) or str(name).strip() == "":
+            return None
+        
+        name_cleaned = str(name).strip()
+        query_parts = [name_cleaned]
+
+        if pd.notna(location_param) and str(location_param).strip() != "":
+            query_parts.append(str(location_param).strip())
+        
+        if use_site_specific: # For old Indeed/LinkedIn style with site:
+            query_parts.append(f"site%3A{term}.com")
+            search_query = "+".join(query_parts)
+        else: # For new style with location and term
+            query_parts.append(term)
+            search_query = "+".join(query_parts)
+            
+        return f"https://www.google.com/search?q={search_query}"
+
+    # Génération des colonnes de liens
+    if "Dénomination - Enseigne" in df_display_erm_processed.columns and "Commune" in df_display_erm_processed.columns:
+        df_display_erm_processed["LinkedIn"] = df_display_erm_processed.apply(
+            lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "linkedin"),
+            axis=1
         )
-    if (
-        "Dénomination - Enseigne" in df_display_erm_processed.columns
-        and "Adresse établissement" in df_display_erm_processed.columns
-    ):
+        df_display_erm_processed["Emploi"] = df_display_erm_processed.apply(
+            lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "emploi"),
+            axis=1
+        )
+
+    if "Dénomination - Enseigne" in df_display_erm_processed.columns and "Adresse établissement" in df_display_erm_processed.columns:
         df_display_erm_processed["Google Maps"] = df_display_erm_processed.apply(
             lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
             if pd.notna(row["Dénomination - Enseigne"])
@@ -1173,29 +1194,22 @@ else:  # df_entreprises_erm is not empty
             else None,
             axis=1,
         )
-        if "Dénomination - Enseigne" in df_display_erm_processed.columns:
-            df_display_erm_processed["Indeed"] = df_display_erm_processed[
-                "Dénomination - Enseigne"
-            ].apply(
-                lambda x: f"https://www.google.com/search?q={x}+site%3Aindeed.com"
-                if pd.notna(x) and x.strip() != ""
-                else None
-            )
+
     # Définir les colonnes à afficher et leur ordre
     # "Effectif Numérique" n'est pas affiché directement mais utilisé pour formater "Nb salariés établissement".
     display_order_base = [
         "SIRET", "Dénomination - Enseigne", 
         "Activité NAF/APE Etablissement", "Adresse établissement", "Commune",
         "Nb salariés établissement", # Colonne formatée
-        "Est siège social", "Date de création Entreprise",
-        "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise"
+        "Est siège social", "Date de création Entreprise"
+        # "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise" # Removed for brevity
     ]
     cols_to_display_erm_tab = display_order_base[:]
     
     # Insert link columns at a specific position
     link_insert_index = cols_to_display_erm_tab.index("Dénomination - Enseigne") + 1
-    if "Indeed" in df_display_erm_processed.columns and "Indeed" not in cols_to_display_erm_tab:
-        cols_to_display_erm_tab.insert(link_insert_index, "Indeed")
+    if "Emploi" in df_display_erm_processed.columns and "Emploi" not in cols_to_display_erm_tab:
+        cols_to_display_erm_tab.insert(link_insert_index, "Emploi")
     if "Google Maps" in df_display_erm_processed.columns and "Google Maps" not in cols_to_display_erm_tab:
         cols_to_display_erm_tab.insert(link_insert_index, "Google Maps")
     if "LinkedIn" in df_display_erm_processed.columns and "LinkedIn" not in cols_to_display_erm_tab:
@@ -1209,7 +1223,7 @@ else:  # df_entreprises_erm is not empty
     column_config_map = {
         "LinkedIn": st.column_config.LinkColumn("LinkedIn", display_text="🔗 LinkedIn"),
         "Google Maps": st.column_config.LinkColumn("Google Maps", display_text="📍 Google Maps"),
-        "Indeed": st.column_config.LinkColumn("Indeed", display_text="🔗 Indeed"),
+        "Emploi": st.column_config.LinkColumn("Emploi", display_text="🔗 Emploi"),
         "Est siège social": st.column_config.CheckboxColumn(disabled=True),
         "Date de création Entreprise": st.column_config.DateColumn(format="DD/MM/YYYY", disabled=True),
         "Chiffre d'Affaires Entreprise": st.column_config.NumberColumn(label="CA Ent.", format="%d €", disabled=True),
@@ -1232,11 +1246,11 @@ try:
     df_entreprises_for_excel = get_visible_erm_data() # Use the filtered data
 
     excel_column_order_core = [
-        "SIRET", "Dénomination - Enseigne", "LinkedIn", "Google Maps", "Indeed",
+        "SIRET", "Dénomination - Enseigne", "LinkedIn", "Google Maps", "Emploi",
         "Activité NAF/APE Etablissement", "Adresse établissement", "Commune",
         "Nb salariés établissement", # This will be the formatted version
         "Est siège social", "Date de création Entreprise",
-        "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise"
+        # "Chiffre d'Affaires Entreprise", "Résultat Net Entreprise", "Année Finances Entreprise" # Removed for brevity
     ]
     # Define other desired columns that might come from config.ENTREPRISES_ERM_COLS
     # and should appear after the core set.
@@ -1270,11 +1284,17 @@ try:
                 return f"{letter_prefix} - {text_upper}" if letter_prefix else text_upper
             df_entreprises_for_excel['Nb salariés établissement'] = df_entreprises_for_excel.apply(format_effectif_for_excel, axis=1)
 
-        # 3. Add link columns
-        if "Dénomination - Enseigne" in df_entreprises_for_excel.columns:
-            df_entreprises_for_excel["LinkedIn"] = df_entreprises_for_excel["Dénomination - Enseigne"].apply(
-                lambda x: f"https://www.google.com/search?q={x}+site%3Alinkedin.com" if pd.notna(x) and x.strip() != "" else None
+        # 3. Add link columns using the helper function
+        if "Dénomination - Enseigne" in df_entreprises_for_excel.columns and "Commune" in df_entreprises_for_excel.columns:
+            df_entreprises_for_excel["LinkedIn"] = df_entreprises_for_excel.apply(
+                lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "linkedin"),
+                axis=1
             )
+            df_entreprises_for_excel["Emploi"] = df_entreprises_for_excel.apply(
+                lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "emploi"),
+                axis=1
+            )
+
         if "Dénomination - Enseigne" in df_entreprises_for_excel.columns and "Adresse établissement" in df_entreprises_for_excel.columns:
             df_entreprises_for_excel["Google Maps"] = df_entreprises_for_excel.apply(
                 lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
@@ -1282,9 +1302,11 @@ try:
                    pd.notna(row["Adresse établissement"]) and row["Adresse établissement"].strip() != ""
                 else None, axis=1
             )
-            df_entreprises_for_excel["Indeed"] = df_entreprises_for_excel["Dénomination - Enseigne"].apply(
-                lambda x: f"https://www.google.com/search?q={x}+site%3Aindeed.com" if pd.notna(x) and x.strip() != "" else None
-            )
+            # The old "Indeed" logic is now replaced by "Emploi" above.
+            # df_entreprises_for_excel["Indeed"] = df_entreprises_for_excel["Dénomination - Enseigne"].apply(
+            #     lambda x: f"https://www.google.com/search?q={x}+site%3Aindeed.com" if pd.notna(x) and x.strip() != "" else None
+            # )
+
         
         # 4. Define final column list and select them
         excel_column_order_suffix = []

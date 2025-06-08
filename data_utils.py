@@ -391,7 +391,7 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "Dénomination - Enseigne",
                 "Recherche LinkedIn",
                 "Recherche Google Maps",
-                "Recherche Indeed",
+                "Recherche Emploi", # Changed from Indeed
                 "Activité NAF/APE Etablissement",
                 "Commune", # <-- ADDED COMMUNE
                 "Adresse établissement",
@@ -399,8 +399,8 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "Est siège social",
                 "Date de création Entreprise",
                 "Chiffre d'Affaires Entreprise",
-                "Résultat Net Entreprise",
-                "Année Finances Entreprise",
+                # "Résultat Net Entreprise", # Removed for brevity as in app.py
+                # "Année Finances Entreprise", # Removed for brevity as in app.py
             ]
             df_entreprises_sheet_headers_only = pd.DataFrame(
                 columns=entreprises_headers
@@ -416,57 +416,57 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 excel_row = r_idx + 2  # Excel rows are 1-indexed, data starts on row 2
                 
                 # Col 1: SIRET
-                ws_entreprises.cell(row=excel_row, column=1, value=f"=DATA_IMPORT!A{excel_row}")
+                ws_entreprises.cell(row=excel_row, column=1, value=f"=IF(ISBLANK(DATA_IMPORT!A{excel_row}),\"\",DATA_IMPORT!A{excel_row})")
                 # Col 2: Dénomination - Enseigne
-                ws_entreprises.cell(row=excel_row, column=2, value=f"=DATA_IMPORT!B{excel_row}")
+                ws_entreprises.cell(row=excel_row, column=2, value=f"=IF(ISBLANK(DATA_IMPORT!B{excel_row}),\"\",DATA_IMPORT!B{excel_row})")
                 
-                # Col 3: Recherche LinkedIn (references Dénomination - Enseigne in col B of ENTREPRISES sheet)
+                # Col 3: Recherche LinkedIn (references Dénomination - Enseigne (B) and Commune (H) in ENTREPRISES sheet)
                 ws_entreprises.cell(
                     row=excel_row,
                     column=3,
-                    value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Alinkedin.com","Recherche LinkedIn")'
+                    value=f'=IF(ISBLANK(B{excel_row}),\"\",HYPERLINK("https://www.google.com/search?q="&ENCODEURL(B{excel_row})&"+"&ENCODEURL(H{excel_row})&"+linkedin","Recherche LinkedIn"))'
                 )
                 # Col 4: Recherche Google Maps (references Dénomination and Adresse établissement in ENTREPRISES sheet)
                 ws_entreprises.cell(
                     row=excel_row,
                     column=4,
-                    value=f'=HYPERLINK("https://www.google.com/maps/search/?api=1&query="&B{excel_row}&","&G{excel_row}&"","Recherche Google Maps")'
+                    value=f'=IF(OR(ISBLANK(B{excel_row}),ISBLANK(G{excel_row})),\"\",HYPERLINK("https://www.google.com/maps/search/?api=1&query="&ENCODEURL(B{excel_row})&","&ENCODEURL(G{excel_row}),"Recherche Google Maps"))'
                 )
-                # Col 5: Recherche Indeed (references Dénomination - Enseigne in ENTREPRISES sheet)
+                # Col 5: Recherche Emploi (references Dénomination - Enseigne (B) and Commune (H) in ENTREPRISES sheet)
                 ws_entreprises.cell(
                     row=excel_row,
                     column=5,
-                    value=f'=HYPERLINK("https://www.google.com/search?q="&B{excel_row}&"+site%3Aindeed.com","Recherche Indeed")'
+                    value=f'=IF(ISBLANK(B{excel_row}),\"\",HYPERLINK("https://www.google.com/search?q="&ENCODEURL(B{excel_row})&"+"&ENCODEURL(H{excel_row})&"+emploi","Recherche Emploi"))'
                 )
                 # Col 6: Activité NAF/APE Etablissement
-                ws_entreprises.cell(row=excel_row, column=6, value=f"=DATA_IMPORT!C{excel_row}") # Activité NAF/APE Etablissement
-                # Col 7: Adresse établissement (Source: DATA_IMPORT col G)
-                ws_entreprises.cell(row=excel_row, column=7, value=f"=DATA_IMPORT!G{excel_row}") # Adresse établissement
-                # Col 8: Commune (Source: DATA_IMPORT col H)
-                ws_entreprises.cell(row=excel_row, column=8, value=f"=DATA_IMPORT!H{excel_row}") # Commune
+                ws_entreprises.cell(row=excel_row, column=6, value=f"=IF(ISBLANK(DATA_IMPORT!C{excel_row}),\"\",DATA_IMPORT!C{excel_row})")
+                # Col 7: Adresse établissement (Source: DATA_IMPORT col G) - this becomes G in ENTREPRISES
+                ws_entreprises.cell(row=excel_row, column=7, value=f"=IF(ISBLANK(DATA_IMPORT!G{excel_row}),\"\",DATA_IMPORT!G{excel_row})")
+                # Col 8: Commune (Source: DATA_IMPORT col H) - this becomes H in ENTREPRISES
+                ws_entreprises.cell(row=excel_row, column=8, value=f"=IF(ISBLANK(DATA_IMPORT!H{excel_row}),\"\",DATA_IMPORT!H{excel_row})")
                 # Col 9: Nb salariés établissement (Source: DATA_IMPORT col I)
                 ws_entreprises.cell(
-                    row=excel_row, column=9, value=f"=DATA_IMPORT!I{excel_row}"
+                    row=excel_row, column=9, value=f"=IF(ISBLANK(DATA_IMPORT!I{excel_row}),\"\",DATA_IMPORT!I{excel_row})"
                 )
                 # Col 10: Est siège social (Source: DATA_IMPORT col J)
                 ws_entreprises.cell(
-                    row=excel_row, column=10, value=f"=DATA_IMPORT!J{excel_row}"
+                    row=excel_row, column=10, value=f"=IF(ISBLANK(DATA_IMPORT!J{excel_row}),\"\",DATA_IMPORT!J{excel_row})"
                 )
                 # Col 11: Date de création Entreprise (Source: DATA_IMPORT col K)
                 ws_entreprises.cell(
-                    row=excel_row, column=11, value=f"=DATA_IMPORT!K{excel_row}"
+                    row=excel_row, column=11, value=f"=IF(ISBLANK(DATA_IMPORT!K{excel_row}),\"\",DATA_IMPORT!K{excel_row})"
                 )
                 # Col 12: Chiffre d'Affaires Entreprise (Source: DATA_IMPORT col L)
                 ws_entreprises.cell(
-                    row=excel_row, column=12, value=f"=DATA_IMPORT!L{excel_row}"
+                    row=excel_row, column=12, value=f"=IF(ISBLANK(DATA_IMPORT!L{excel_row}),\"\",DATA_IMPORT!L{excel_row})"
                 )
                 # Col 13: Résultat Net Entreprise (Source: DATA_IMPORT col M)
                 ws_entreprises.cell(
-                    row=excel_row, column=13, value=f"=DATA_IMPORT!M{excel_row}"
+                    row=excel_row, column=13, value=f"=IF(ISBLANK(DATA_IMPORT!M{excel_row}),\"\",DATA_IMPORT!M{excel_row})"
                 )
                 # Col 14: Année Finances Entreprise (Source: DATA_IMPORT col N)
                 ws_entreprises.cell(
-                    row=excel_row, column=14, value=f"=DATA_IMPORT!N{excel_row}"
+                    row=excel_row, column=14, value=f"=IF(ISBLANK(DATA_IMPORT!N{excel_row}),\"\",DATA_IMPORT!N{excel_row})"
                 )
                 # SIREN column (formerly col 14) is removed from ENTREPRISES sheet
             
@@ -792,7 +792,7 @@ def generate_user_erm_excel(
                 "Dénomination - Enseigne",
                 "Recherche LinkedIn",
                 "Recherche Google Maps",
-                "Recherche Indeed",
+                "Recherche Emploi", # Changed from Indeed
                 "Activité NAF/APE Etablissement",
                 "Commune", # <-- ADDED COMMUNE
                 "Adresse établissement",
@@ -800,11 +800,11 @@ def generate_user_erm_excel(
                 "Est siège social",
                 "Date de création Entreprise",
                 "Chiffre d'Affaires Entreprise",
-                "Résultat Net Entreprise",
-                "Année Finances Entreprise",
+                # "Résultat Net Entreprise", # Removed for brevity
+                # "Année Finances Entreprise", # Removed for brevity
             ]
             
-            hyperlink_col_names = ["Recherche LinkedIn", "Recherche Google Maps", "Recherche Indeed"]
+            hyperlink_col_names = ["Recherche LinkedIn", "Recherche Google Maps", "Recherche Emploi"]
 
             # Build the final list of columns for the ENTREPRISES sheet structure, inserting hyperlink columns.
             final_cols_for_sheet_structure = entreprises_export_base_cols[:]
@@ -838,33 +838,44 @@ def generate_user_erm_excel(
             # Determine column letters for formula references.
             # Assumes "Dénomination - Enseigne" is column B. "Adresse établissement" column letter is found dynamically.
             col_letter_denomination = 'B' # Dénomination - Enseigne
+            if "Dénomination - Enseigne" in final_cols_for_sheet_structure:
+                 col_letter_denomination = get_column_letter(final_cols_for_sheet_structure.index("Dénomination - Enseigne") + 1)
+
             adresse_col_name = "Adresse établissement"
             col_letter_adresse = 'A' # Default, will be updated
             if adresse_col_name in final_cols_for_sheet_structure:
                 col_letter_adresse = get_column_letter(final_cols_for_sheet_structure.index(adresse_col_name) + 1)
+
+            commune_col_name = "Commune"
+            col_letter_commune = 'A' # Default, will be updated
+            if commune_col_name in final_cols_for_sheet_structure:
+                col_letter_commune = get_column_letter(final_cols_for_sheet_structure.index(commune_col_name) + 1)
             
             # Write HYPERLINK formulas row by row
             for r_idx in range(num_data_rows_entreprises_sheet):
                 excel_row = r_idx + 2  # Excel rows are 1-indexed
 
                 # Recherche LinkedIn
-                linkedin_col_idx = final_cols_for_sheet_structure.index("Recherche LinkedIn") + 1
-                ws_entreprises_export.cell(
-                    row=excel_row, column=linkedin_col_idx,
-                    value=f'=HYPERLINK("https://www.google.com/search?q="&{col_letter_denomination}{excel_row}&"+site%3Alinkedin.com","Recherche LinkedIn")'
-                )
+                if "Recherche LinkedIn" in final_cols_for_sheet_structure:
+                    linkedin_col_idx = final_cols_for_sheet_structure.index("Recherche LinkedIn") + 1
+                    ws_entreprises_export.cell(
+                        row=excel_row, column=linkedin_col_idx,
+                        value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),\"\",HYPERLINK("https://www.google.com/search?q="&ENCODEURL({col_letter_denomination}{excel_row})&"+"&ENCODEURL({col_letter_commune}{excel_row})&"+linkedin","Recherche LinkedIn"))'
+                    )
                 # Recherche Google Maps
-                gmaps_col_idx = final_cols_for_sheet_structure.index("Recherche Google Maps") + 1
-                ws_entreprises_export.cell(
-                    row=excel_row, column=gmaps_col_idx,
-                    value=f'=HYPERLINK("https://www.google.com/maps/search/?api=1&query="&{col_letter_denomination}{excel_row}&","&{col_letter_adresse}{excel_row}&"","Recherche Google Maps")'
-                )
-                # Recherche Indeed
-                indeed_col_idx = final_cols_for_sheet_structure.index("Recherche Indeed") + 1
-                ws_entreprises_export.cell(
-                    row=excel_row, column=indeed_col_idx,
-                    value=f'=HYPERLINK("https://www.google.com/search?q="&{col_letter_denomination}{excel_row}&"+site%3Aindeed.com","Recherche Indeed")'
-                )
+                if "Recherche Google Maps" in final_cols_for_sheet_structure:
+                    gmaps_col_idx = final_cols_for_sheet_structure.index("Recherche Google Maps") + 1
+                    ws_entreprises_export.cell(
+                        row=excel_row, column=gmaps_col_idx,
+                        value=f'=IF(OR(ISBLANK({col_letter_denomination}{excel_row}),ISBLANK({col_letter_adresse}{excel_row})),\"\",HYPERLINK("https://www.google.com/maps/search/?api=1&query="&ENCODEURL({col_letter_denomination}{excel_row})&","&ENCODEURL({col_letter_adresse}{excel_row}),"Recherche Google Maps"))'
+                    )
+                # Recherche Emploi
+                if "Recherche Emploi" in final_cols_for_sheet_structure:
+                    emploi_col_idx = final_cols_for_sheet_structure.index("Recherche Emploi") + 1
+                    ws_entreprises_export.cell(
+                        row=excel_row, column=emploi_col_idx,
+                        value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),\"\",HYPERLINK("https://www.google.com/search?q="&ENCODEURL({col_letter_denomination}{excel_row})&"+"&ENCODEURL({col_letter_commune}{excel_row})&"+emploi","Recherche Emploi"))'
+                    )
             
             # --- Sheet 3: VALEURS_LISTE ---
             # Contains static lists from config.py for data validation dropdowns.
