@@ -7,3 +7,4 @@ openpyxl
 openai
 pydantic
 simplekml
+beautifulsoup4

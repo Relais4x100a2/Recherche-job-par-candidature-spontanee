@@ -311,7 +311,7 @@ with col_gauche:
 
     # --- SECTION POUR L'ASSISTANT IA ---
     st.subheader("💡 Assistant IA pour définir les critères de recherche")
-    st.caption("Décrivez le type d'entreprise (secteur d'activités, taille effectif) et le poste que vous recherchez, et l'IA tentera de présélectionner les secteurs et tailles d'effectifs.")
+    st.caption("Décrivez le type d'entreprise (secteur d'activités, taille effectif) et le poste que vous recherchez, et l'IA tentera de présélectionner les secteurs et tailles d'effectifs. Autrement, vous pouvez copier-coller une partie de votre CV.")
     ia_text_input = st.text_area(
         "Votre description pour l'IA :",
         placeholder="Ex: Un poste de Lead Dev dans une startup.",
@@ -323,6 +323,8 @@ with col_gauche:
         # Effacer le résumé précédent avant de générer un nouveau
         # Et réinitialiser l'état de choix des suggestions précédentes
         st.session_state.last_ia_summary = None
+        st.session_state.ai_suggested_naf_sections = None
+        st.session_state.ai_suggested_specific_codes = None
         st.session_state.ai_suggestion_choice_pending = False
 
         if ia_text_input and ia_text_input.strip():
