@@ -1,6 +1,7 @@
 import datetime
 import json
 import os
+import urllib.parse
 
 import pandas as pd
 import pydeck as pdk
@@ -1476,28 +1477,34 @@ else:  # df_entreprises_erm is not empty
 
     # Helper function to generate Google search URLs
     def generate_google_search_url(name, location_param, term, use_site_specific=False):
-        if pd.isna(name) or str(name).strip() == "":
+        # Ensure name and location_param are strings before stripping, handle None/NA
+        name_str = str(name) if pd.notna(name) else ""
+        location_param_str = str(location_param) if pd.notna(location_param) else ""
+
+        if not name_str.strip():
             return None
         
-        name_cleaned = str(name).strip()
-        query_parts = [name_cleaned]
+        name_cleaned = name_str.strip()
+        query_parts = [urllib.parse.quote_plus(name_cleaned)]
 
-        if pd.notna(location_param) and str(location_param).strip() != "":
-            query_parts.append(str(location_param).strip())
+        if location_param_str.strip():
+            query_parts.append(urllib.parse.quote_plus(location_param_str.strip()))
         
+        encoded_term = urllib.parse.quote_plus(term)
+
         if use_site_specific: # For old Indeed/LinkedIn style with site:
-            query_parts.append(f"site%3A{term}.com")
-            search_query = "+".join(query_parts)
+            query_parts.append(f"site%3A{encoded_term}.com") # term is the site here
+            search_query_params = "+".join(query_parts)
         else: # For new style with location and term
-            query_parts.append(term)
-            search_query = "+".join(query_parts)
+            query_parts.append(encoded_term) # term is the search keyword
+            search_query_params = "+".join(query_parts)
             
-        return f"https://www.google.com/search?q={search_query}"
+        return f"https://www.google.com/search?q={search_query_params}"
 
     # Génération des colonnes de liens
     if "Dénomination - Enseigne" in df_display_erm_processed.columns and "Commune" in df_display_erm_processed.columns:
         df_display_erm_processed["LinkedIn"] = df_display_erm_processed.apply(
-            lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "linkedin"),
+            lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "linkedin", use_site_specific=False),
             axis=1
         )
         df_display_erm_processed["Emploi"] = df_display_erm_processed.apply(
@@ -1507,11 +1514,13 @@ else:  # df_entreprises_erm is not empty
 
     if "Dénomination - Enseigne" in df_display_erm_processed.columns and "Adresse établissement" in df_display_erm_processed.columns:
         df_display_erm_processed["Google Maps"] = df_display_erm_processed.apply(
-            lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
-            if pd.notna(row["Dénomination - Enseigne"])
-            and row["Dénomination - Enseigne"].strip() != ""
-            and pd.notna(row["Adresse établissement"])
-            and row["Adresse établissement"].strip() != ""
+            lambda row: (
+                f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote_plus(str(row['Dénomination - Enseigne']))},{urllib.parse.quote_plus(str(row['Adresse établissement']))}"
+            )
+            if pd.notna(row.get("Dénomination - Enseigne"))
+            and str(row.get("Dénomination - Enseigne")).strip() != ""
+            and pd.notna(row.get("Adresse établissement"))
+            and str(row.get("Adresse établissement")).strip() != ""
             else None,
             axis=1,
         )
@@ -1608,7 +1617,7 @@ try:
         # 3. Add link columns using the helper function
         if "Dénomination - Enseigne" in df_entreprises_for_excel.columns and "Commune" in df_entreprises_for_excel.columns:
             df_entreprises_for_excel["LinkedIn"] = df_entreprises_for_excel.apply(
-                lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "linkedin"),
+                lambda row: generate_google_search_url(row.get("Dénomination - Enseigne"), row.get("Commune"), "linkedin", use_site_specific=False),
                 axis=1
             )
             df_entreprises_for_excel["Emploi"] = df_entreprises_for_excel.apply(
@@ -1618,9 +1627,11 @@ try:
 
         if "Dénomination - Enseigne" in df_entreprises_for_excel.columns and "Adresse établissement" in df_entreprises_for_excel.columns:
             df_entreprises_for_excel["Google Maps"] = df_entreprises_for_excel.apply(
-                lambda row: f"https://www.google.com/maps/search/?api=1&query={row['Dénomination - Enseigne']},{row['Adresse établissement']}"
-                if pd.notna(row["Dénomination - Enseigne"]) and row["Dénomination - Enseigne"].strip() != "" and \
-                   pd.notna(row["Adresse établissement"]) and row["Adresse établissement"].strip() != ""
+                lambda row: (
+                    f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote_plus(str(row['Dénomination - Enseigne']))},{urllib.parse.quote_plus(str(row['Adresse établissement']))}"
+                )
+                if pd.notna(row.get("Dénomination - Enseigne")) and str(row.get("Dénomination - Enseigne")).strip() != "" and \
+                   pd.notna(row.get("Adresse établissement")) and str(row.get("Adresse établissement")).strip() != ""
                 else None, axis=1
             )
             # The old "Indeed" logic is now replaced by "Emploi" above.

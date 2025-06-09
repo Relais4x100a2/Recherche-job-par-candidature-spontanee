@@ -329,6 +329,37 @@ def traitement_reponse_api(entreprises, selected_effectifs_codes):
     # print(f"{dt.datetime.now()} - DEBUG - traitement_reponse_api: Final DataFrame has {len(final_df_result)} rows.")
     return final_df_result
 
+def sanitize_column_name_for_my_maps(name: str) -> str:
+    """
+    Sanitizes a column name to be compatible with Google My Maps import requirements.
+    - Replaces common problematic characters/patterns with underscores.
+    - Removes explicitly forbidden characters by Google My Maps.
+    - Truncates to 64 characters.
+    """
+    name = str(name)
+
+    # Replace common problematic patterns first
+    name = name.replace(" - ", "_")  # e.g., "Dénomination - Enseigne"
+    name = name.replace("/", "_")    # e.g., "NAF/APE"
+    
+    # Replace remaining spaces with underscores
+    name = name.replace(" ", "_")
+
+    # Remove explicitly forbidden characters by Google My Maps: " < > { } |
+    forbidden_chars = '"<>{}\\|' # Pipe needs to be escaped for regex, but simple replace is fine.
+    for char_to_remove in forbidden_chars:
+        name = name.replace(char_to_remove, "")
+
+    # Remove any resulting multiple underscores
+    while "__" in name:
+        name = name.replace("__", "_")
+    
+    # Strip leading/trailing underscores that might result
+    name = name.strip("_")
+
+    # Truncate to 64 characters
+    return name[:64]
+
 
 def generate_erm_excel(df_entreprises_input: pd.DataFrame):
     """
@@ -377,16 +408,21 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                     df_data_import[col] = np.nan
 
             df_data_import = df_data_import[data_import_cols]
-            df_data_import.to_excel(
+            
+            # Sanitize column names for DATA_IMPORT sheet
+            df_data_import_excel = df_data_import.copy()
+            df_data_import_excel.columns = [sanitize_column_name_for_my_maps(col) for col in df_data_import_excel.columns]
+            df_data_import_excel.to_excel(
                 writer, sheet_name="DATA_IMPORT", index=False, freeze_panes=(1, 0)
             )
-            num_data_rows = len(df_data_import)
+            num_data_rows = len(df_data_import) # Based on original data count
             # print(f"{dt.datetime.now()} - DEBUG - DATA_IMPORT sheet created with {num_data_rows} rows.")
 
             # --- Sheet 2: ENTREPRISES ---
             # This sheet displays processed company information, with some columns populated by formulas referencing DATA_IMPORT.
             # print(f"{dt.datetime.now()} - DEBUG - Creating ENTREPRISES sheet with formulas.")
             entreprises_headers = [
+                # No hyperlink columns in the initial header definition
                 "SIRET",
                 "Dénomination - Enseigne",
                 "Recherche LinkedIn",
@@ -402,10 +438,12 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 # "Résultat Net Entreprise", # Removed for brevity as in app.py
                 # "Année Finances Entreprise", # Removed for brevity as in app.py
             ]
+            # Sanitize headers for ENTREPRISES sheet
+            sanitized_entreprises_headers = [sanitize_column_name_for_my_maps(h) for h in entreprises_headers]
             df_entreprises_sheet_headers_only = pd.DataFrame(
-                columns=entreprises_headers
+                columns=sanitized_entreprises_headers
             )
-            df_entreprises_sheet_headers_only.to_excel(
+            df_entreprises_sheet_headers_only.to_excel( # Writes sanitized headers
                 writer, sheet_name="ENTREPRISES", index=False, freeze_panes=(1, 0)
             )
 
@@ -493,8 +531,12 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 for col, lst in vl_data_from_config.items()
             }
             df_valeurs_liste = pd.DataFrame(padded_vl_data)
-            df_valeurs_liste = df_valeurs_liste[vl_headers]  # Ensure column order
-            df_valeurs_liste.to_excel(
+            df_valeurs_liste = df_valeurs_liste[vl_headers]  # Ensure column order based on original headers
+
+            # Sanitize column names for VALEURS_LISTE sheet
+            df_valeurs_liste_excel = df_valeurs_liste.copy()
+            df_valeurs_liste_excel.columns = [sanitize_column_name_for_my_maps(col) for col in df_valeurs_liste_excel.columns]
+            df_valeurs_liste_excel.to_excel(
                 writer, sheet_name="VALEURS_LISTE", index=False, freeze_panes=(1, 0)
             )
 
@@ -510,8 +552,10 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "Profil LinkedIn URL",
                 "Notes",
             ]
-            df_contacts = pd.DataFrame(columns=contacts_headers)
-            df_contacts.to_excel(
+            # Sanitize headers for CONTACTS sheet
+            sanitized_contacts_headers = [sanitize_column_name_for_my_maps(h) for h in contacts_headers]
+            df_contacts = pd.DataFrame(columns=sanitized_contacts_headers)
+            df_contacts.to_excel( # Writes sanitized headers
                 writer, sheet_name="CONTACTS", index=False, freeze_panes=(1, 0)
             )
 
@@ -526,8 +570,10 @@ def generate_erm_excel(df_entreprises_input: pd.DataFrame):
                 "Statut Action",
                 "Statut Opportunuité Taf",
             ]
-            df_actions = pd.DataFrame(columns=actions_headers)
-            df_actions.to_excel(
+            # Sanitize headers for ACTIONS sheet
+            sanitized_actions_headers = [sanitize_column_name_for_my_maps(h) for h in actions_headers]
+            df_actions = pd.DataFrame(columns=sanitized_actions_headers)
+            df_actions.to_excel( # Writes sanitized headers
                 writer, sheet_name="ACTIONS", index=False, freeze_panes=(1, 0)
             )
 
@@ -775,7 +821,11 @@ def generate_user_erm_excel(
                     df_data_import[col] = pd.NA
 
             df_data_import = df_data_import[data_import_cols]
-            df_data_import.to_excel(
+
+            # Sanitize column names for DATA_IMPORT sheet
+            df_data_import_excel = df_data_import.copy()
+            df_data_import_excel.columns = [sanitize_column_name_for_my_maps(col) for col in df_data_import_excel.columns]
+            df_data_import_excel.to_excel(
                 writer, sheet_name="DATA_IMPORT", index=False, freeze_panes=(1, 0)
             )
             num_data_rows_entreprises = len(
@@ -789,10 +839,11 @@ def generate_user_erm_excel(
             # SIREN, Code effectif établissement, Effectif Numérique are excluded here.
             entreprises_export_base_cols = [
                 "SIRET",
-                "Dénomination - Enseigne",
-                "Recherche LinkedIn",
-                "Recherche Google Maps",
-                "Recherche Emploi", # Changed from Indeed
+                "Dénomination - Enseigne",                
+                # No hyperlink columns in the base columns
+                # "Recherche LinkedIn",
+                # "Recherche Google Maps",
+                # "Recherche Emploi",
                 "Activité NAF/APE Etablissement",
                 "Commune", # <-- ADDED COMMUNE
                 "Adresse établissement",
@@ -828,11 +879,15 @@ def generate_user_erm_excel(
                 elif col not in hyperlink_col_names: # Ensure all structural columns exist even if not in source df.
                     df_entreprises_to_export[col] = pd.NA
             
+            # Ensure correct column order and drop any columns not in final_cols_for_sheet_structure
             df_entreprises_to_export = df_entreprises_to_export.reindex(columns=final_cols_for_sheet_structure)
-
-            df_entreprises_sheet.to_excel(
+            
+            # Sanitize column names for ENTREPRISES sheet before export
+            df_entreprises_to_export_excel = df_entreprises_to_export.copy()
+            df_entreprises_to_export_excel.columns = [sanitize_column_name_for_my_maps(col) for col in df_entreprises_to_export_excel.columns]
+            df_entreprises_to_export_excel.to_excel(
                 writer, sheet_name="ENTREPRISES", index=False, freeze_panes=(1, 0)
-            )
+            ) # This writes the DataFrame with sanitized headers
             ws_entreprises_export = workbook["ENTREPRISES"]
             
             # Determine column letters for formula references.
@@ -858,24 +913,51 @@ def generate_user_erm_excel(
                 # Recherche LinkedIn
                 if "Recherche LinkedIn" in final_cols_for_sheet_structure:
                     linkedin_col_idx = final_cols_for_sheet_structure.index("Recherche LinkedIn") + 1
-                    ws_entreprises_export.cell(
-                        row=excel_row, column=linkedin_col_idx,
-                        value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),\"\",HYPERLINK("https://www.google.com/search?q="&ENCODEURL({col_letter_denomination}{excel_row})&"+"&ENCODEURL({col_letter_commune}{excel_row})&"+linkedin","Recherche LinkedIn"))'
-                    )
+                    # Lire l'URL pré-calculée depuis df_entreprises_sheet (qui est une copie de df_entreprises de app.py)
+                    linkedin_url = df_entreprises_sheet.iloc[r_idx]["LinkedIn"] # Utiliser .iloc et le nom de colonne correct
+                    if pd.notna(linkedin_url) and str(linkedin_url).strip():
+                        linkedin_url_excel = str(linkedin_url).replace('"', '""') # Échapper les guillemets pour Excel
+                        ws_entreprises_export.cell(
+                            row=excel_row, column=linkedin_col_idx,
+                            value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),"",HYPERLINK("{linkedin_url_excel}","Recherche LinkedIn"))'
+                        )
+                    else: # URL vide ou NA
+                        ws_entreprises_export.cell(
+                            row=excel_row, column=linkedin_col_idx,
+                            value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),"","")' # Ou simplement ""
+                        )
+
                 # Recherche Google Maps
                 if "Recherche Google Maps" in final_cols_for_sheet_structure:
                     gmaps_col_idx = final_cols_for_sheet_structure.index("Recherche Google Maps") + 1
-                    ws_entreprises_export.cell(
-                        row=excel_row, column=gmaps_col_idx,
-                        value=f'=IF(OR(ISBLANK({col_letter_denomination}{excel_row}),ISBLANK({col_letter_adresse}{excel_row})),\"\",HYPERLINK("https://www.google.com/maps/search/?api=1&query="&ENCODEURL({col_letter_denomination}{excel_row})&","&ENCODEURL({col_letter_adresse}{excel_row}),"Recherche Google Maps"))'
-                    )
+                    gmaps_url = df_entreprises_sheet.iloc[r_idx]["Google Maps"] # Utiliser .iloc et le nom de colonne correct
+                    if pd.notna(gmaps_url) and str(gmaps_url).strip():
+                        gmaps_url_excel = str(gmaps_url).replace('"', '""')
+                        ws_entreprises_export.cell(
+                            row=excel_row, column=gmaps_col_idx,
+                            value=f'=IF(OR(ISBLANK({col_letter_denomination}{excel_row}),ISBLANK({col_letter_adresse}{excel_row})),"",HYPERLINK("{gmaps_url_excel}","Recherche Google Maps"))'
+                        )
+                    else: # URL vide ou NA
+                        ws_entreprises_export.cell(
+                            row=excel_row, column=gmaps_col_idx,
+                            value=f'=IF(OR(ISBLANK({col_letter_denomination}{excel_row}),ISBLANK({col_letter_adresse}{excel_row})),"","")' # Ou simplement ""
+                        )
+
                 # Recherche Emploi
                 if "Recherche Emploi" in final_cols_for_sheet_structure:
                     emploi_col_idx = final_cols_for_sheet_structure.index("Recherche Emploi") + 1
-                    ws_entreprises_export.cell(
-                        row=excel_row, column=emploi_col_idx,
-                        value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),\"\",HYPERLINK("https://www.google.com/search?q="&ENCODEURL({col_letter_denomination}{excel_row})&"+"&ENCODEURL({col_letter_commune}{excel_row})&"+emploi","Recherche Emploi"))'
-                    )
+                    emploi_url = df_entreprises_sheet.iloc[r_idx]["Emploi"] # Utiliser .iloc et le nom de colonne correct
+                    if pd.notna(emploi_url) and str(emploi_url).strip():
+                        emploi_url_excel = str(emploi_url).replace('"', '""')
+                        ws_entreprises_export.cell(
+                            row=excel_row, column=emploi_col_idx,
+                            value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),"",HYPERLINK("{emploi_url_excel}","Recherche Emploi"))'
+                        )
+                    else: # URL vide ou NA
+                        ws_entreprises_export.cell(
+                            row=excel_row, column=emploi_col_idx,
+                            value=f'=IF(ISBLANK({col_letter_denomination}{excel_row}),"","")' # Ou simplement ""
+                        )
             
             # --- Sheet 3: VALEURS_LISTE ---
             # Contains static lists from config.py for data validation dropdowns.
@@ -921,8 +1003,12 @@ def generate_user_erm_excel(
 
             df_valeurs_liste = pd.DataFrame(padded_vl_data)
             # Ensure column order based on final_vl_headers
-            df_valeurs_liste = df_valeurs_liste[final_vl_headers] 
-            df_valeurs_liste.to_excel(
+            df_valeurs_liste = df_valeurs_liste[final_vl_headers]
+
+            # Sanitize column names for VALEURS_LISTE sheet
+            df_valeurs_liste_excel = df_valeurs_liste.copy()
+            df_valeurs_liste_excel.columns = [sanitize_column_name_for_my_maps(col) for col in df_valeurs_liste_excel.columns]
+            df_valeurs_liste_excel.to_excel(
                 writer, sheet_name="VALEURS_LISTE", index=False, freeze_panes=(1, 0)
             )
             
@@ -943,7 +1029,11 @@ def generate_user_erm_excel(
                 if col not in df_contacts_sheet.columns:
                     df_contacts_sheet[col] = pd.NA
             df_contacts_sheet = df_contacts_sheet[expected_contact_cols]
-            df_contacts_sheet.to_excel(
+
+            # Sanitize column names for CONTACTS sheet
+            df_contacts_sheet_excel = df_contacts_sheet.copy()
+            df_contacts_sheet_excel.columns = [sanitize_column_name_for_my_maps(col) for col in df_contacts_sheet_excel.columns]
+            df_contacts_sheet_excel.to_excel(
                 writer, sheet_name="CONTACTS", index=False, freeze_panes=(1, 0)
             )
             
@@ -971,7 +1061,11 @@ def generate_user_erm_excel(
                 if col not in df_actions_sheet.columns:
                     df_actions_sheet[col] = pd.NA
             df_actions_sheet = df_actions_sheet[expected_action_cols]
-            df_actions_sheet.to_excel(
+
+            # Sanitize column names for ACTIONS sheet
+            df_actions_sheet_excel = df_actions_sheet.copy()
+            df_actions_sheet_excel.columns = [sanitize_column_name_for_my_maps(col) for col in df_actions_sheet_excel.columns]
+            df_actions_sheet_excel.to_excel(
                 writer, sheet_name="ACTIONS", index=False, freeze_panes=(1, 0)
             )
             
