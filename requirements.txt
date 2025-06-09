@@ -6,3 +6,4 @@ pydeck
 openpyxl
 openai
 pydantic
+simplekml

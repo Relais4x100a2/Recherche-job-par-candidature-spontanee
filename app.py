@@ -150,6 +150,20 @@ if "ai_suggested_specific_codes" not in st.session_state:
 if "ai_suggestion_choice_pending" not in st.session_state:
     st.session_state.ai_suggestion_choice_pending = False
 
+# === NEW SESSION STATE VARIABLES FOR MAP FILTERS ===
+if "map_filter_siege_social" not in st.session_state:
+    st.session_state.map_filter_siege_social = "Tous" # "Tous", "Sièges", "Secondaires"
+if "map_filter_selected_effectif_groups" not in st.session_state:
+    # Initialize with all effectif group keys selected
+    st.session_state.map_filter_selected_effectif_groups = list(config.effectifs_groupes_details.keys())
+if "map_filter_selected_naf_sections" not in st.session_state:
+    # Initialize with all NAF section letters (will be refined based on data)
+    st.session_state.map_filter_selected_naf_sections = list(config.naf_sections_details.keys())
+if "map_filter_all_effectifs_selected" not in st.session_state:
+    st.session_state.map_filter_all_effectifs_selected = True
+if "map_filter_all_naf_sections_selected" not in st.session_state:
+    st.session_state.map_filter_all_naf_sections_selected = True
+# === END NEW SESSION STATE VARIABLES FOR MAP FILTERS ===
 
 # --- HELPER FUNCTION FOR VISIBLE ERM DATA ---
 def get_visible_erm_data():
@@ -206,6 +220,14 @@ def create_search_params_description(adresse, radius, naf_sections, naf_specific
 
 # --- GESTION DE L'ÉTAT DE SESSION POUR LES PARAMÈTRES DE RECHERCHE ---
 # Initialise les sélections par défaut pour les filtres NAF et effectifs
+
+# --- SIDEBAR CONTENT ---
+with st.sidebar:
+    st.info(
+        "ℹ️ Les résultats de chaque nouvelle recherche sont ajoutés à la liste principale. "
+        "Vous pouvez gérer la visibilité de chaque recherche ci-dessous ou effacer toutes les données."
+    )
+    st.markdown("---")
 # si elles ne sont pas déjà présentes dans l'état de session.
 # --- TITRE ET DESCRIPTION (Toujours visible) ---
 st.title(
@@ -218,7 +240,7 @@ st.subheader(
 st.markdown(
     """
     Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés.\n  
-    _**(*) Je traverse la route et je vous trouve un travail !**_ Vous n'avez pas la réf. ? Revoyez <a href="https://www.youtube.com/watch?v=FHMy6DhOXrI" target="_blank">la vidéo </a> ou consultez la page <a href="https://fr.wikipedia.org/wiki/Je_traverse_la_rue_et_je_vous_trouve_un_travail" target="_blank">Wikipedia</a>.
+    _**(*) Je traverse la route et je vous trouve un travail !**_ Vous n'avez pas la réf. ? Revoyez la <a href="https://www.youtube.com/watch?v=FHMy6DhOXrI" target="_blank">vidéo</a> ou consultez la page <a href="https://fr.wikipedia.org/wiki/Je_traverse_la_rue_et_je_vous_trouve_un_travail" target="_blank">Wikipedia</a>.
     """,
     unsafe_allow_html=True
 )
@@ -352,21 +374,22 @@ with col_gauche:
             st.session_state.ai_suggestion_choice_pending = False # Assurer la réinitialisation
 
     # Affichage du dernier résumé de l'IA et des options de choix si nécessaire
+with col_droite:
+    # Affichage du dernier résumé de l'IA et des options de choix si nécessaire
     if st.session_state.last_ia_summary:
-        st.markdown("---")
         st.info(st.session_state.last_ia_summary, icon="🤖")
         if st.session_state.get("ai_suggestion_choice_pending", False):
             st.markdown("**Comment souhaitez-vous appliquer les suggestions NAF de l'IA ?**")
-            col_choice1, col_choice2 = st.columns(2)
-            with col_choice1:
-                if st.button("Appliquer Secteurs NAF Uniquement", key="apply_sections_only", use_container_width=True):
+            col_choice1_ia, col_choice2_ia = st.columns(2)
+            with col_choice1_ia:
+                if st.button("Appliquer Secteurs NAF Uniquement", key="apply_sections_only_coldroite", use_container_width=True):
                     st.session_state.selected_naf_letters = st.session_state.ai_suggested_naf_sections
                     st.session_state.selected_specific_naf_codes = set() # Effacer les codes spécifiques
                     st.session_state.ai_suggestion_choice_pending = False
                     st.toast("Secteurs NAF suggérés par l'IA appliqués.", icon="👍")
                     st.rerun()
-            with col_choice2:
-                if st.button("Appliquer Secteurs ET Codes Spécifiques", key="apply_sections_and_specific", use_container_width=True):
+            with col_choice2_ia:
+                if st.button("Appliquer Secteurs ET Codes Spécifiques", key="apply_sections_and_specific_coldroite", use_container_width=True):
                     st.session_state.selected_naf_letters = st.session_state.ai_suggested_naf_sections
                     st.session_state.selected_specific_naf_codes = set(st.session_state.ai_suggested_specific_codes)
                     st.session_state.ai_suggestion_choice_pending = False
@@ -374,96 +397,96 @@ with col_gauche:
                     st.rerun()
         st.markdown("---") # Séparateur après le bloc IA
 
+    st.subheader("Réglage/affinage manuel des critères de recherche")
 
-with col_droite:
-    st.subheader("📊 Tranches d'effectifs salariés (Établissement)")
-
-    def on_effectif_change(group_key_arg, codes_in_group_arg):
-        """
-        Callback pour la sélection des groupes de tranches d'effectifs.
-        Met à jour st.session_state.selected_effectifs_codes en fonction de la sélection du groupe.
-        """
-        eff_key = f"eff_group_{group_key_arg}"
-        is_selected = st.session_state[eff_key]
-        current_selection_codes_eff = set(st.session_state.selected_effectifs_codes)
-        if is_selected:
-            current_selection_codes_eff.update(codes_in_group_arg)
-        else:
-            current_selection_codes_eff.difference_update(codes_in_group_arg)
-        st.session_state.selected_effectifs_codes = sorted(
-            list(current_selection_codes_eff)
-        )
-        # Streamlit gère le rerun après l'exécution du callback on_change.
-
-    cols_eff = st.columns(2)
-    col_idx_eff = 0
-    for group_key, details in config.effectifs_groupes_details.items():
-        is_group_currently_selected = any(
-            code in st.session_state.selected_effectifs_codes
-            for code in details["codes"]
-        )
-        with cols_eff[col_idx_eff % len(cols_eff)]:
-            st.checkbox(
-                f"{details['icon']} {details['label']}",
-                value=is_group_currently_selected,
-                key=f"eff_group_{group_key}",
-                on_change=on_effectif_change,
-                args=(group_key, details["codes"]),
+    with st.expander("📊 Tranches d'effectifs salariés (Établissement)", expanded=False):
+        def on_effectif_change(group_key_arg, codes_in_group_arg):
+            """
+            Callback pour la sélection des groupes de tranches d'effectifs.
+            Met à jour st.session_state.selected_effectifs_codes en fonction de la sélection du groupe.
+            """
+            eff_key = f"eff_group_{group_key_arg}"
+            is_selected = st.session_state[eff_key]
+            current_selection_codes_eff = set(st.session_state.selected_effectifs_codes)
+            if is_selected:
+                current_selection_codes_eff.update(codes_in_group_arg)
+            else:
+                current_selection_codes_eff.difference_update(codes_in_group_arg)
+            st.session_state.selected_effectifs_codes = sorted(
+                list(current_selection_codes_eff)
             )
-        col_idx_eff += 1
-    st.subheader("📂 Secteurs d'activité NAF")
-    st.caption(
-        "Sélectionnez les sections larges. Vous pourrez affiner par codes spécifiques ci-dessous (optionnel)."
-    )
+            # Streamlit gère le rerun après l'exécution du callback on_change.
 
-    def on_section_change():
-        """
-        Callback pour la sélection des sections NAF.
-        Met à jour st.session_state.selected_naf_letters.
-        Si une section est désélectionnée, les codes NAF spécifiques associés à cette section sont retirés de la sélection.
-        """
-        current_sections = []
-        for letter in config.naf_sections_details:  # Utiliser la nouvelle structure
-            if st.session_state.get(f"naf_section_{letter}", False):
-                current_sections.append(letter)
-        if set(current_sections) != set(st.session_state.selected_naf_letters):
-            st.session_state.selected_naf_letters = current_sections
-            st.session_state.selected_specific_naf_codes = {
-                code
-                for code in st.session_state.selected_specific_naf_codes
-                if data_utils.get_section_for_code(code)
-                in st.session_state.selected_naf_letters
-            }
-            # Streamlit gère le rerun.
-
-    cols_naf = st.columns(2)
-    col_idx_naf = 0
-    for letter, details in sorted(config.naf_sections_details.items()):
-        with cols_naf[col_idx_naf]:
-            st.checkbox(
-                f"{details['icon']} {details['description']}",
-                value=(letter in st.session_state.selected_naf_letters),
-                key=f"naf_section_{letter}",
-                on_change=on_section_change,
+        cols_eff = st.columns(2)
+        col_idx_eff = 0
+        for group_key, details in config.effectifs_groupes_details.items():
+            is_group_currently_selected = any(
+                code in st.session_state.selected_effectifs_codes
+                for code in details["codes"]
             )
-        col_idx_naf = (col_idx_naf + 1) % len(cols_naf)
+            with cols_eff[col_idx_eff % len(cols_eff)]:
+                st.checkbox(
+                    f"{details['icon']} {details['label']}",
+                    value=is_group_currently_selected,
+                    key=f"eff_group_{group_key}",
+                    on_change=on_effectif_change,
+                    args=(group_key, details["codes"]),
+                )
+            col_idx_eff += 1
 
-    # --- Affinage Optionnel par Codes NAF Spécifiques ---
-    with st.expander("Affiner par codes NAF spécifiques (Optionnel)", expanded=False):
+    with st.expander("📂 Secteurs d'activité NAF", expanded=False):
+        st.caption(
+            "Sélectionnez les sections larges. Vous pourrez affiner par codes spécifiques ci-dessous (optionnel)."
+        )
+
+        def on_section_change():
+            """
+            Callback pour la sélection des sections NAF.
+            Met à jour st.session_state.selected_naf_letters.
+            Si une section est désélectionnée, les codes NAF spécifiques associés à cette section sont retirés de la sélection.
+            """
+            current_sections = []
+            for letter in config.naf_sections_details:  # Utiliser la nouvelle structure
+                if st.session_state.get(f"naf_section_{letter}", False):
+                    current_sections.append(letter)
+            if set(current_sections) != set(st.session_state.selected_naf_letters):
+                st.session_state.selected_naf_letters = current_sections
+                st.session_state.selected_specific_naf_codes = {
+                    code
+                    for code in st.session_state.selected_specific_naf_codes
+                    if data_utils.get_section_for_code(code)
+                    in st.session_state.selected_naf_letters
+                }
+                # Streamlit gère le rerun.
+
+        cols_naf = st.columns(2)
+        col_idx_naf = 0
+        for letter, details in sorted(config.naf_sections_details.items()):
+            with cols_naf[col_idx_naf]:
+                st.checkbox(
+                    f"{details['icon']} {details['description']}",
+                    value=(letter in st.session_state.selected_naf_letters),
+                    key=f"naf_section_{letter}",
+                    on_change=on_section_change,
+                )
+            col_idx_naf = (col_idx_naf + 1) % len(cols_naf)
+
+    # --- Affinage Optionnel par Codes NAF Spécifiques (maintenant un expander séparé) ---
+    with st.expander("🏷️ Affiner par codes NAF spécifiques (Optionnel)", expanded=False):
         selected_sections_sorted = sorted(st.session_state.selected_naf_letters)
         if not selected_sections_sorted:
             st.caption(
-                "Sélectionnez au moins une section NAF ci-dessus pour pouvoir affiner par code."
+                "Sélectionnez au moins une section NAF dans l'expander ci-dessus pour pouvoir affiner par code."
             )
         else:
 
-            def on_specific_naf_change(change_type, section_letter=None, code=None):
+            def on_specific_naf_change_col_droite(change_type, section_letter=None, code=None): # Renamed callback
                 """
                 Callback pour la sélection des codes NAF spécifiques.
                 Gère la sélection/désélection de tous les codes d'une section ou d'un code individuel.
                 """
                 if change_type == "select_all":
-                    select_all_key = f"select_all_{section_letter}"
+                    select_all_key = f"select_all_col_droite_{section_letter}" # Added suffix to key
                     should_select_all = st.session_state[select_all_key]
                     codes_in_section = set(
                         data_utils.get_codes_for_section(section_letter)
@@ -477,7 +500,7 @@ with col_droite:
                             codes_in_section
                         )
                 elif change_type == "individual":
-                    cb_key = f"specific_naf_cb_{code}"
+                    cb_key = f"specific_naf_cb_col_droite_{code}" # Added suffix to key
                     is_selected = st.session_state[cb_key]
                     if is_selected:
                         st.session_state.selected_specific_naf_codes.add(code)
@@ -507,8 +530,8 @@ with col_droite:
                 st.checkbox(
                     "Tout sélectionner / Désélectionner pour cette section",
                     value=are_all_selected,
-                    key=f"select_all_{section_letter}",
-                    on_change=on_specific_naf_change,
+                    key=f"select_all_col_droite_{section_letter}", # Added suffix to key
+                    on_change=on_specific_naf_change_col_droite,
                     args=("select_all", section_letter),
                 )
                 st.markdown("---")
@@ -524,8 +547,8 @@ with col_droite:
                             value=(
                                 code in st.session_state.selected_specific_naf_codes
                             ),
-                            key=f"specific_naf_cb_{code}",
-                            on_change=on_specific_naf_change,
+                            key=f"specific_naf_cb_col_droite_{code}", # Added suffix to key
+                            on_change=on_specific_naf_change_col_droite,
                             args=("individual", None, code),
                         )
                     col_idx_specific += 1
@@ -550,13 +573,7 @@ with col_contenu_bouton:
         use_container_width=True # Le bouton prendra toute la largeur de col_contenu_bouton
     )
 
-# Le message d'information est placé sous le bouton, occupant la pleine largeur
-st.info(
-    "Note : Les résultats d'une nouvelle recherche sont **ajoutés** au tableau ci-dessous. "
-    "Utilisez le bouton 'Effacer le tableau des établissements' dans la 'Zone de danger' pour repartir d'une liste vide."
-    )
 st.markdown("---")
-
 # --- ZONE D'AFFICHAGE DES RÉSULTATS ---
 results_container = st.container()
 
@@ -1012,29 +1029,17 @@ if st.session_state.get("breakdown_search_pending", False):
         st.rerun()
 
 # --- UI FOR MANAGING PAST SEARCHES ---
-with st.sidebar.expander("⚙️ Gérer l'historique et l'affichage des recherches", expanded=True):
-    if not st.session_state.past_searches:
-        st.caption("Aucune recherche dans l'historique.")
-    else:
-        # Toggle all visibility
-        # Check current state of all individual toggles to set the 'master' toggle
-        all_currently_visible_in_ui = all(s.get("is_visible", True) for s in st.session_state.past_searches)
-
-        def toggle_all_visibility_callback():
-            new_master_state = st.session_state.toggle_all_visibility_cb
-            for i in range(len(st.session_state.past_searches)):
-                st.session_state.past_searches[i]["is_visible"] = new_master_state
-            # No st.rerun() here, it's handled by Streamlit due to on_change
-
-        st.checkbox(
-            "Afficher/Masquer toutes les recherches",
-            value=all_currently_visible_in_ui,
-            key="toggle_all_visibility_cb",
-            on_change=toggle_all_visibility_callback,
-            help="Cochez pour afficher les résultats de toutes les recherches, décochez pour masquer."
-        )
-        st.markdown("---")
-
+with st.sidebar:
+    with st.expander("⚙️ Gérer l'historique et l'affichage des recherches", expanded=True):
+        if not st.session_state.past_searches:
+            st.caption("Aucune recherche dans l'historique.")
+        else:
+            st.markdown(
+                "<small>Cochez/décochez une recherche pour afficher/masquer ses résultats "
+                "dans le tableau et sur la carte. Utilisez la poubelle pour supprimer "
+                "une recherche et ses résultats uniques de l'ERM.</small>",
+                unsafe_allow_html=True
+            )
         for search_item in st.session_state.past_searches:
             search_id_hist = search_item["id"]
             # Find the item in session_state by ID to ensure we're working with the current version
@@ -1056,7 +1061,7 @@ with st.sidebar.expander("⚙️ Gérer l'historique et l'affichage des recherch
             
             with col_toggle:
                 # Callback for individual toggle
-                def individual_toggle_callback(sid):
+                def individual_toggle_callback(sid): # sourcery skip: instance-method-first-arg-name
                     for i_s_cb, s_cb_item in enumerate(st.session_state.past_searches):
                         if s_cb_item["id"] == sid:
                             st.session_state.past_searches[i_s_cb]["is_visible"] = st.session_state[f"visible_search_cb_{sid}"]
@@ -1108,7 +1113,6 @@ with st.sidebar.expander("⚙️ Gérer l'historique et l'affichage des recherch
             st.markdown("---")
 
 
-
 # --- AFFICHAGE PERSISTANT DES RÉSULTATS DE RECHERCHE (SI EXISTANTS) ---
 with results_container: # This container is now also used by breakdown logic for its messages
     # Check if there are results to display from session_state
@@ -1138,17 +1142,74 @@ with results_container: # This container is now also used by breakdown logic for
             radius_display = st.session_state.search_radius
 
             st.success(
-            f"📊 {df_search_results_display_count} établissement(s) actuellement visible(s) sur la carte et dans l'ERM."
+            f"📊 {df_search_results_display_count} établissement(s) correspondent aux recherches actives et sont visibles dans l'ERM."
             )
 
             # Affichage Carte
             st.subheader("Carte des établissements trouvés")
-            # Use the globally visible data for the map points
-            df_map_points = df_visible_for_map_and_summary.dropna(
+
+            # --- 1. LOGIQUE DE FILTRAGE DES DONNÉES POUR LA CARTE (basée sur st.session_state) ---
+            df_for_map_data_preparation = df_visible_for_map_and_summary.copy()
+
+            # Appliquer filtre Siège Social
+            if st.session_state.map_filter_siege_social == "Sièges sociaux uniquement":
+                df_for_map_data_preparation = df_for_map_data_preparation[df_for_map_data_preparation["Est siège social"] == True]
+            elif st.session_state.map_filter_siege_social == "Établissements secondaires uniquement":
+                df_for_map_data_preparation = df_for_map_data_preparation[df_for_map_data_preparation["Est siège social"] == False]
+
+            # Appliquer filtre Effectifs
+            selected_eff_codes_for_map_data = []
+            if st.session_state.map_filter_selected_effectif_groups:
+                for group_key_data_prep in st.session_state.map_filter_selected_effectif_groups:
+                    selected_eff_codes_for_map_data.extend(config.effectifs_groupes_details[group_key_data_prep]["codes"])
+            
+            if selected_eff_codes_for_map_data:
+                df_for_map_data_preparation = df_for_map_data_preparation[df_for_map_data_preparation["Code effectif établissement"].isin(selected_eff_codes_for_map_data)]
+            elif not st.session_state.map_filter_all_effectifs_selected and not selected_eff_codes_for_map_data : # No effectif groups selected via filter UI
+                 df_for_map_data_preparation = df_for_map_data_preparation.iloc[0:0]
+            
+            # Appliquer filtre Sections NAF
+            if st.session_state.map_filter_selected_naf_sections:
+                df_for_map_data_preparation = df_for_map_data_preparation[df_for_map_data_preparation["Section NAF"].isin(st.session_state.map_filter_selected_naf_sections)]
+            elif not st.session_state.map_filter_all_naf_sections_selected and not st.session_state.map_filter_selected_naf_sections: # No NAF sections selected via filter UI
+                 df_for_map_data_preparation = df_for_map_data_preparation.iloc[0:0]
+
+            # Préparer les données finales pour la carte
+            df_map_points_filtered = df_for_map_data_preparation.dropna(
                 subset=["Latitude", "Longitude", "Radius", "Color"]
             ).copy()
+            # Ajout d'une colonne pour un affichage plus clair du type d'établissement dans le tooltip
+            if 'Est siège social' in df_map_points_filtered.columns:
+                df_map_points_filtered['Type Etablissement Display'] = df_map_points_filtered['Est siège social'].apply(
+                    lambda x: 'Siège Social' if x is True else ('Établissement Secondaire' if x is False else 'Type Inconnu')
+                )
 
-            if not df_map_points.empty:
+                # # --- DEBUG START ---
+                # # Décommentez ces lignes pour inspecter la colonne 'Est siège social'
+                # st.write("--- DEBUG INFO ---")
+                # st.write("Valeurs dans df_map_points_filtered['Est siège social'] AVANT séparation sièges/secondaires:")
+                # if "Est siège social" in df_map_points_filtered.columns:
+                #      st.write(f"Type: {df_map_points_filtered['Est siège social'].dtype}")
+                #      st.write(f"Uniques: {df_map_points_filtered['Est siège social'].unique()}")
+                #      st.write(f"Value Counts (incl. NA):\n{df_map_points_filtered['Est siège social'].value_counts(dropna=False)}")
+                # #     
+                # #     # Vérifier combien seraient True, False, ou autre chose
+                #      is_true_series_debug = df_map_points_filtered['Est siège social'] == True
+                #      is_false_series_debug = df_map_points_filtered['Est siège social'] == False
+                #      st.write(f"Nombre de True (par '== True'): {is_true_series_debug.sum()}")
+                #      st.write(f"Nombre de False (par '== False'): {is_false_series_debug.sum()}")
+                # else:
+                #      st.write("Colonne 'Est siège social' NON TROUVÉE dans df_map_points_filtered.")
+                # st.write("--- FIN DEBUG INFO ---")
+                # # --- DEBUG END ---
+
+            else:
+                df_map_points_filtered['Type Etablissement Display'] = 'Type Inconnu'
+            # --- FIN LOGIQUE DE FILTRAGE DES DONNÉES ---
+
+            st.info(f"🗺️ Affichage de {len(df_map_points_filtered)} établissement(s) sur la carte selon les filtres actifs.")
+            deck_map_object = None 
+            if not df_map_points_filtered.empty:
                 zoom_level = 11
                 if radius_display <= 1: zoom_level = 14
                 elif radius_display <= 5: zoom_level = 12
@@ -1160,63 +1221,197 @@ with results_container: # This container is now also used by breakdown logic for
                     latitude=lat_centre_display, longitude=lon_centre_display,
                     zoom=zoom_level, pitch=0, bearing=0,
                 )
-                layer = pdk.Layer(
-                    "ScatterplotLayer", data=df_map_points,
-                    get_position="[Longitude, Latitude]", get_color="Color", get_radius="Radius",
-                    radius_min_pixels=3, radius_max_pixels=60,
-                    pickable=True, auto_highlight=True,
-                )
-                tooltip = {
-                    "html": "<b>{Dénomination - Enseigne}</b><br/>SIRET: {SIRET}<br/>Activité Étab.: {Activité NAF/APE Etablissement}<br/>Effectif Étab.: {Nb salariés établissement}",
-                    "style": {"backgroundColor": "rgba(0,0,0,0.7)", "color": "white", "border": "1px solid white", "padding": "5px"},
-                }
-                deck = pdk.Deck(
-                    layers=[layer], initial_view_state=initial_view_state,
-                    map_style="mapbox://styles/mapbox/light-v9", tooltip=tooltip, height=600,
-                )
-                st.pydeck_chart(deck)
 
-                # Affichage Légende
-                st.subheader("Légende")
-                cols_legende = st.columns([1, 2])
-                with cols_legende[0]:
+                # Séparer les données en deux groupes : Sièges sociaux et Établissements secondaires
+                df_sieges = df_map_points_filtered[df_map_points_filtered["Est siège social"] == True].copy()
+                df_secondaires = df_map_points_filtered[df_map_points_filtered["Est siège social"] == False].copy()
+
+                layers_list = []
+
+                # Layer pour les Sièges sociaux (Cercles)
+                if not df_sieges.empty:
+                    layer_sieges = pdk.Layer(
+                        "ScatterplotLayer",
+                        data=df_sieges,
+                        get_position="[Longitude, Latitude]",
+                        get_color="Color",
+                        get_radius="Radius", # Utilise Radius pour la taille
+                        radius_min_pixels=3,
+                        radius_max_pixels=60,
+                        pickable=True,
+                        auto_highlight=True,
+                    )
+                    layers_list.append(layer_sieges)
+                
+                # --- DEBUG START ---
+                # # Décommentez pour voir le nombre de sièges et secondaires après la séparation
+                # st.write(f"DEBUG: Nombre de sièges (df_sieges): {len(df_sieges)}")
+                # st.write(f"DEBUG: Nombre de secondaires (df_secondaires): {len(df_secondaires)}")
+                # --- DEBUG END ---
+
+                # Layer pour les Établissements secondaires (Cercles évidés)
+                if not df_secondaires.empty:
+                    layer_secondaires = pdk.Layer(
+                        "ScatterplotLayer", # Utiliser ScatterplotLayer
+                        data=df_secondaires,
+                        get_position="[Longitude, Latitude]",
+                        # Configuration pour des cercles évidés
+                        filled=False,  # Ne pas remplir le cercle
+                        stroked=True,  # Dessiner le contour
+                        get_line_color="Color",  # Couleur du contour basée sur NAF
+                        get_line_width=2,  # Épaisseur du contour en pixels (ajustez si besoin)
+                        line_width_min_pixels=1, # Assurer une épaisseur minimale
+                        # Taille du cercle (contour)
+                        get_radius="Radius",
+                        radius_min_pixels=3,
+                        radius_max_pixels=60,
+                        pickable=True,
+                        auto_highlight=True,
+                    )
+                    layers_list.append(layer_secondaires)
+
+                if layers_list: # Crée le deck uniquement s'il y a des couches à afficher
+                    tooltip = {
+                        "html": "<b>{Dénomination - Enseigne}</b><br/>SIRET: {SIRET}<br/>Activité Étab.: {Activité NAF/APE Etablissement}<br/>Effectif Étab.: {Nb salariés établissement}<br/>Type: {Type Etablissement Display}",
+                        "style": {"backgroundColor": "rgba(0,0,0,0.7)", "color": "white", "border": "1px solid white", "padding": "5px"},
+                    }
+                    deck_map_object = pdk.Deck(
+                        layers=layers_list, # Utilise la liste des couches (cercles + triangles)
+                        initial_view_state=initial_view_state,
+                        map_style="mapbox://styles/mapbox/light-v9", # Ou votre style préféré
+                        tooltip=tooltip, # Utilise le tooltip mis à jour
+                        height=600
+                    )
+                    st.pydeck_chart(deck_map_object)
+                    st.caption("Sur la carte : la taille des points représente l'effectif, la couleur représente le secteur d'activité NAF. ● = Siège social, ○ = Établissement secondaire.")
+                else: # df_map_points_filtered était non vide, mais ni df_sieges ni df_secondaires n'ont été peuplés (ne devrait pas arriver si Est siège social est toujours True/False)
+                     st.info("Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte selon les filtres actifs (problème de classification Siège/Secondaire).")
+            else:
+                st.info("Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte selon les filtres actifs.")
+
+            # --- 3. BOUTON DE TÉLÉCHARGEMENT DE LA CARTE ---
+            # Les boutons de téléchargement HTML et KML ont été retirés.
+            # Si vous souhaitez les réintroduire, le code précédent peut être restauré ici.
+            # Pour l'instant, nous laissons cette section vide ou avec un commentaire.
+            # st.markdown("---") # Optionnel: si vous voulez un séparateur visuel
+            pass
+
+
+            # --- 4. UI DES FILTRES DE LA CARTE (Expander) ---
+            with st.expander("Filtres de la carte et Légende", expanded=True):
+                # Créer trois colonnes pour les filtres
+                map_filter_col_type, map_filter_col_taille, map_filter_col_secteur = st.columns(3)
+
+                with map_filter_col_type:
+                    st.markdown("**Type d'établissement**")
+                    siege_options_ui = ["Tous", "Sièges sociaux uniquement", "Établissements secondaires uniquement"]
+                    current_siege_filter_index_ui = siege_options_ui.index(st.session_state.map_filter_siege_social)
+
+                    def format_siege_option_display(option_value):
+                        if option_value == "Sièges sociaux uniquement":
+                            return f"● {option_value}"
+                        elif option_value == "Établissements secondaires uniquement":
+                            return f"○ {option_value}" # Changé pour un cercle évidé
+                        return option_value # Pour "Tous"
+                    
+                    new_siege_filter_value_ui = st.radio(
+                        "Filtrer par type d'établissement :",
+                        options=siege_options_ui,
+                        index=current_siege_filter_index_ui,
+                        key="map_siege_filter_radio_ui",
+                        format_func=format_siege_option_display,
+                        # horizontal=True, # Peut être retiré ou conservé selon la préférence pour l'affichage vertical dans une colonne plus étroite
+                        label_visibility="collapsed"
+                    )
+                    if new_siege_filter_value_ui != st.session_state.map_filter_siege_social:
+                        st.session_state.map_filter_siege_social = new_siege_filter_value_ui
+                        st.rerun()
+
+                with map_filter_col_taille:
                     st.markdown("**Taille ≈ Effectif établissement**")
-                    legend_pixel_sizes = {"01": 8, "12": 12, "32": 18, "53": 24}
-                    base_circle_style = "display: inline-block; border-radius: 50%; background-color: #808080; margin-right: 5px; vertical-align: middle;"
-                    legend_sizes = {"01": "Petit", "12": "Moyen", "32": "Grand", "53": "Très Grand"}
-                    active_eff_codes = set(st.session_state.selected_effectifs_codes)
-                    displayed_legend_sizes = set()
-                    for group_label, group_details in config.effectifs_groupes_details.items(): # Use groupes_details
-                        group_codes = group_details["codes"]
-                        if any(code in active_eff_codes for code in group_codes):
-                            rep_code = next((c for c in ["01", "12", "32", "53"] if c in group_codes), None)
-                            if rep_code and rep_code not in displayed_legend_sizes:
-                                displayed_legend_sizes.add(rep_code)
-                                label = legend_sizes[rep_code]
-                                pixel_size = legend_pixel_sizes.get(rep_code, 8)
-                                circle_html = f'<span style="{base_circle_style} height: {pixel_size}px; width: {pixel_size}px;"></span>'
-                                st.markdown(f"{circle_html} {label} ({group_details['label']})", unsafe_allow_html=True)
-                with cols_legende[1]:
-                    st.markdown("**Couleur = Secteur d'activité**")
-                    if "Section NAF" in df_map_points.columns:
-                        sections_in_final_results = sorted(list(set(df_map_points["Section NAF"].unique()) - {"N/A"}))
-                        if not sections_in_final_results:
-                            st.caption("Aucune section NAF trouvée dans les résultats.")
+                    def toggle_all_effectifs_map_filter_ui():
+                        if st.session_state.map_select_all_effectifs_cb_ui:
+                            st.session_state.map_filter_selected_effectif_groups = list(config.effectifs_groupes_details.keys())
                         else:
-                            legend_color_cols = st.columns(3)
-                            col_idx_legend_color = 0
-                            for letter in sections_in_final_results:
-                                if letter in config.naf_sections_details:
-                                    with legend_color_cols[col_idx_legend_color % len(legend_color_cols)]:
-                                        color_rgb = config.naf_color_mapping.get(letter, [128, 128, 128])
-                                        color_hex = "#%02x%02x%02x" % tuple(color_rgb)
-                                        desc_legende = config.naf_sections_details[letter]["description"]
-                                        st.markdown(f"<span style='color:{color_hex}; font-size: 1.2em; display: inline-block; margin-right: 4px;'>⬤</span>{desc_legende}", unsafe_allow_html=True)
-                                    col_idx_legend_color += 1
+                            st.session_state.map_filter_selected_effectif_groups = []
+                        st.session_state.map_filter_all_effectifs_selected = st.session_state.map_select_all_effectifs_cb_ui
+
+                    st.checkbox("Tout sélectionner/désélectionner (Effectifs)", 
+                                value=st.session_state.map_filter_all_effectifs_selected, 
+                                key="map_select_all_effectifs_cb_ui", 
+                                on_change=toggle_all_effectifs_map_filter_ui)
+
+                    for group_key, details in config.effectifs_groupes_details.items():
+                        is_checked_eff_ui = group_key in st.session_state.map_filter_selected_effectif_groups
+                        
+                        def effectif_group_change_callback_ui(g_key_cb):
+                            if st.session_state[f"map_filter_eff_group_cb_ui_{g_key_cb}"]:
+                                if g_key_cb not in st.session_state.map_filter_selected_effectif_groups:
+                                    st.session_state.map_filter_selected_effectif_groups.append(g_key_cb)
+                            else:
+                                if g_key_cb in st.session_state.map_filter_selected_effectif_groups:
+                                    st.session_state.map_filter_selected_effectif_groups.remove(g_key_cb)
+                            st.session_state.map_filter_all_effectifs_selected = len(st.session_state.map_filter_selected_effectif_groups) == len(config.effectifs_groupes_details)
+                            # st.rerun()
+
+                        st.checkbox(f"{details['icon']} {details['label']}", 
+                                    value=is_checked_eff_ui, 
+                                    key=f"map_filter_eff_group_cb_ui_{group_key}",
+                                    on_change=effectif_group_change_callback_ui,
+                                    args=(group_key,))
+
+                with map_filter_col_secteur:
+                    st.markdown("**Couleur = Secteur d'activité**")
+                    available_naf_sections_on_map_for_ui = sorted(list(set(df_visible_for_map_and_summary["Section NAF"].unique()) - {"N/A"}))
+
+                    def toggle_all_naf_map_filter_ui():
+                        if st.session_state.map_select_all_naf_cb_ui:
+                            st.session_state.map_filter_selected_naf_sections = available_naf_sections_on_map_for_ui
+                        else:
+                            st.session_state.map_filter_selected_naf_sections = []
+                        st.session_state.map_filter_all_naf_sections_selected = st.session_state.map_select_all_naf_cb_ui
+                        # st.rerun()
+
+                    if available_naf_sections_on_map_for_ui:
+                        st.checkbox("Tout sélectionner/désélectionner (Secteurs NAF)", 
+                                    value=st.session_state.map_filter_all_naf_sections_selected, 
+                                    key="map_select_all_naf_cb_ui", 
+                                    on_change=toggle_all_naf_map_filter_ui)
+                        for section_letter in available_naf_sections_on_map_for_ui:
+                            if section_letter in config.naf_sections_details:
+                                details = config.naf_sections_details[section_letter]
+                                color_rgb = config.naf_color_mapping.get(section_letter, [128,128,128])
+                                color_hex = "#%02x%02x%02x" % tuple(color_rgb)
+                                is_checked_naf_ui = section_letter in st.session_state.map_filter_selected_naf_sections
+                                label_text_only_ui = details['description']
+
+                                col_dot_ui, col_cb_ui = st.columns([1, 15], gap="small")
+                                with col_dot_ui:
+                                    st.markdown(
+                                        f"<span style='color:{color_hex}; font-size: 1.3em; vertical-align: middle;'>⬤</span>",
+                                        unsafe_allow_html=True
+                                    )
+                                
+                                def naf_section_change_callback_ui(s_letter_cb):
+                                    if st.session_state[f"map_filter_naf_section_cb_ui_{s_letter_cb}"]:
+                                        if s_letter_cb not in st.session_state.map_filter_selected_naf_sections:
+                                            st.session_state.map_filter_selected_naf_sections.append(s_letter_cb)
+                                    else:
+                                        if s_letter_cb in st.session_state.map_filter_selected_naf_sections:
+                                            st.session_state.map_filter_selected_naf_sections.remove(s_letter_cb)
+                                    st.session_state.map_filter_all_naf_sections_selected = len(st.session_state.map_filter_selected_naf_sections) == len(available_naf_sections_on_map_for_ui)
+                                    # st.rerun()
+
+                                with col_cb_ui:
+                                    st.checkbox(
+                                        label_text_only_ui,
+                                        value=is_checked_naf_ui,
+                                        key=f"map_filter_naf_section_cb_ui_{section_letter}",
+                                        on_change=naf_section_change_callback_ui,
+                                        args=(section_letter,)
+                                    )
                     else:
-                        st.warning("Colonne 'Section NAF' non trouvée pour la légende des couleurs.")
-            else: # df_map_display is empty
-                st.info("Aucun établissement avec des coordonnées géographiques valides à afficher sur la carte.")
+                        st.caption("Aucune section NAF à filtrer pour les résultats actuels.")
         
         elif df_visible_for_map_and_summary.empty and st.session_state.past_searches:
             st.info("Aucun établissement à afficher. Vérifiez les filtres de visibilité dans 'Gérer l'historique...' ou lancez une nouvelle recherche.")
@@ -1231,8 +1426,7 @@ df_display_erm_filtered = get_visible_erm_data()
 
 if df_display_erm_filtered.empty:
     st.info(
-        "Aucune entreprise à afficher. Lancez une recherche pour en ajouter, "
-        "ou vérifiez les filtres de visibilité dans 'Gérer l'historique...'."
+        "Aucune entreprise à afficher. Lancez une recherche pour en ajouter."
     )
         # The clear button is hidden if the table is already empty
 else:  # df_entreprises_erm is not empty
@@ -1471,17 +1665,19 @@ st.markdown("---")
 st.markdown(" Propulsé avec les API Data Gouv : [API Recherche d’Entreprises](https://www.data.gouv.fr/fr/dataservices/api-recherche-dentreprises/), [API Découpage administratif](https://guides.data.gouv.fr/reutiliser-des-donnees/utiliser-les-api-geographiques/utiliser-lapi-decoupage-administratif) & [API Adresse](https://www.data.gouv.fr/fr/dataservices/api-adresse-base-adresse-nationale-ban/)")
 st.markdown("---")
 # --- Bouton pour effacer le tableau des établissements ---
-if not st.session_state.df_entreprises_erm.empty:
-    with st.expander("Zone de danger", expanded=True):
-        st.warning("Attention : Cette action effacera **toutes** les entreprises de l'ERM et l'historique des recherches.")
-        if st.button("🗑️ Effacer toutes les données (ERM et Historique)", key="clear_all_data_button"):
-            st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES) # Réinitialise avec dtypes
-            # Optionnel: effacer aussi contacts et actions si liés, ou laisser pour une gestion manuelle
-            # st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
-            # st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
-            
-            # Clear search history
-            st.session_state.past_searches = []
-            st.session_state.next_search_id = 0
+with st.sidebar:
+    st.markdown("---") # Separator before danger zone
+    if not st.session_state.df_entreprises_erm.empty or st.session_state.past_searches : # Show if there's any data to clear
+        with st.expander("⚠️ Zone de danger", expanded=False):
+            st.warning("Attention : Cette action effacera **toutes** les entreprises de l'ERM et l'historique des recherches.")
+            if st.button("🗑️ Effacer toutes les données (ERM et Historique)", key="clear_all_data_button_sidebar", type="secondary", use_container_width=True):
+                st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES) # Réinitialise avec dtypes
+                # Optionnel: effacer aussi contacts et actions si liés, ou laisser pour une gestion manuelle
+                # st.session_state.df_contacts_erm = pd.DataFrame(columns=config.CONTACTS_ERM_COLS)
+                # st.session_state.df_actions_erm = pd.DataFrame(columns=config.ACTIONS_ERM_COLS)
+                
+                # Clear search history
+                st.session_state.past_searches = []
+                st.session_state.next_search_id = 0
 
-            st.rerun() # Rerun to update the display immediately
+                st.rerun() # Rerun to update the display immediately
