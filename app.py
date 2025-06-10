@@ -21,7 +21,8 @@ st.set_page_config(layout="wide")
 st.markdown(
     """
 <style>
-    /* Style général pour tous les boutons primaires de Streamlit */
+    /* Cible les boutons primaires de Streamlit */
+    /* Cible les boutons primaires de Streamlit */
     .stButton > button[kind="primary"] {
         font-weight: bold !important;
         border: 1px solid #2980B9 !important; /* Bleu plus foncé pour la bordure */
@@ -36,32 +37,47 @@ st.markdown(
         background-color: #2E86C1 !important; /* Bleu légèrement plus foncé */
     }
 
-    /* Style spécifique pour le bouton "Appliquer Secteurs NAF Uniquement" */
-    /* On cible le bouton par son texte pour une meilleure robustesse */
-    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs NAF Uniquement") {
-        background-color: #28A745 !important; /* Vert pour "Secteurs NAF Uniquement" */
-        border-color: #218838 !important;
+    /* Cible les boutons secondaires de Streamlit */
+    .stButton > button[kind="secondary"] {
+        font-weight: normal !important; /* Police normale pour les secondaires */
+        border: 1px solid #3498DB !important; /* Bordure avec la couleur primaire */
+        padding: 0.6em 1.2em !important;
+        box-shadow: 0px 1px 2px rgba(0, 0, 0, 0.1) !important; /* Ombre plus légère */
+        background-color: white !important;  /* Fond blanc */
+        color: #3498DB !important; /* Texte avec la couleur primaire */
     }
 
-    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs NAF Uniquement"):hover {
-        background-color: #218838 !important;
-        border-color: #1E7E34 !important;
+    .stButton > button[kind="secondary"]:hover {
+        border-color: #2980B9 !important; /* Bordure primaire plus foncée au survol */
+        background-color: #f0f8ff !important; /* Fond très légèrement bleu (AliceBlue) au survol */
+        color: #2980B9 !important; /* Texte primaire plus foncé au survol */
     }
 
-    /* Style spécifique pour le bouton "Appliquer Secteurs ET Codes Spécifiques" */
-    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs ET Codes Spécifiques") {
-        background-color: #FFC107 !important; /* Jaune pour "Secteurs ET Codes Spécifiques" */
-        border-color: #E0A800 !important;
-        color: #333 !important; /* Texte plus foncé pour un meilleur contraste */
+    /* Cible les boutons tertiaires de Streamlit */
+    .stButton > button[kind="tertiary"] {
+        font-weight: normal !important;
+        border-color: #ddd !important; /* Bordure gris clair très subtile au survol */
+        border: 0.5px solid black !important; /* Bordure visible initialement */
+        padding: 0.6em 1.2em !important;
+        box-shadow: none !important; /* Pas d'ombre */
+        background-color: #ffffe0 !important;  /* Fond jaune clair */
+        color: #555 !important; /* Couleur de texte discrète, gris foncé */
     }
 
-    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs ET Codes Spécifiques"):hover {
-        background-color: #E0A800 !important;
-        border-color: #C69500 !important;
+    .stButton > button[kind="tertiary"]:hover {
+        border-color: #ddd !important; /* Bordure gris clair très subtile au survol */
+        border: 1px solid black !important; /* Bordure visible initialement */
+        background-color: #ffff0a !important; /* Fond gris très clair au survol */
+        color: #333 !important; /* Texte légèrement plus foncé au survol */
     }
+
+    /* Styles spécifiques pour les boutons "Appliquer Secteurs..." (vert et jaune) */
+    /* Ces styles doivent être placés APRÈS les styles généraux des boutons secondaires si dans le même bloc, */
+    /* ou dans un bloc CSS séparé. S'ils sont plus spécifiques, ils surchargeront de toute façon. */
+    /* Assurez-vous que les sélecteurs pour ces boutons spécifiques sont corrects et ciblent bien button[data-testid="stBaseButton-secondary"] */
 </style>
 """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True,
 )
 
 # --- ERM DATA HANDLING FUNCTIONS (REMOVED - Data is now session-only) ---
@@ -417,14 +433,14 @@ with col_droite:
             st.markdown("**Comment souhaitez-vous appliquer les suggestions NAF de l'IA ?**")
             col_choice1_ia, col_choice2_ia = st.columns(2)
             with col_choice1_ia:
-                if st.button("Appliquer Secteurs NAF Uniquement", key="apply_sections_only_coldroite", use_container_width=True):
+                if st.button("Appliquer Secteurs NAF Uniquement", type="tertiary", key="apply_sections_only_coldroite", use_container_width=True):
                     st.session_state.selected_naf_letters = st.session_state.ai_suggested_naf_sections
                     st.session_state.selected_specific_naf_codes = set() # Effacer les codes spécifiques
                     st.session_state.ai_suggestion_choice_pending = False
                     st.toast("Secteurs NAF suggérés par l'IA appliqués.", icon="👍")
                     st.rerun()
             with col_choice2_ia:
-                if st.button("Appliquer Secteurs ET Codes Spécifiques", key="apply_sections_and_specific_coldroite", use_container_width=True):
+                if st.button("Appliquer Secteurs ET Codes Spécifiques", type="tertiary", key="apply_sections_and_specific_coldroite", use_container_width=True):
                     st.session_state.selected_naf_letters = st.session_state.ai_suggested_naf_sections
                     st.session_state.selected_specific_naf_codes = set(st.session_state.ai_suggested_specific_codes)
                     st.session_state.ai_suggestion_choice_pending = False
