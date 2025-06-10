@@ -21,8 +21,7 @@ st.set_page_config(layout="wide")
 st.markdown(
     """
 <style>
-    /* Cible les boutons primaires de Streamlit */
-    /* Cible les boutons primaires de Streamlit */
+    /* Style général pour tous les boutons primaires de Streamlit */
     .stButton > button[kind="primary"] {
         font-weight: bold !important;
         border: 1px solid #2980B9 !important; /* Bleu plus foncé pour la bordure */
@@ -36,9 +35,33 @@ st.markdown(
         border-color: #1F618D !important; /* Bleu encore plus foncé */
         background-color: #2E86C1 !important; /* Bleu légèrement plus foncé */
     }
+
+    /* Style spécifique pour le bouton "Appliquer Secteurs NAF Uniquement" */
+    /* On cible le bouton par son texte pour une meilleure robustesse */
+    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs NAF Uniquement") {
+        background-color: #28A745 !important; /* Vert pour "Secteurs NAF Uniquement" */
+        border-color: #218838 !important;
+    }
+
+    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs NAF Uniquement"):hover {
+        background-color: #218838 !important;
+        border-color: #1E7E34 !important;
+    }
+
+    /* Style spécifique pour le bouton "Appliquer Secteurs ET Codes Spécifiques" */
+    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs ET Codes Spécifiques") {
+        background-color: #FFC107 !important; /* Jaune pour "Secteurs ET Codes Spécifiques" */
+        border-color: #E0A800 !important;
+        color: #333 !important; /* Texte plus foncé pour un meilleur contraste */
+    }
+
+    .stButton > button[data-testid="stButton"] > div > p:contains("Appliquer Secteurs ET Codes Spécifiques"):hover {
+        background-color: #E0A800 !important;
+        border-color: #C69500 !important;
+    }
 </style>
 """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
 # --- ERM DATA HANDLING FUNCTIONS (REMOVED - Data is now session-only) ---
@@ -223,31 +246,40 @@ def create_search_params_description(adresse, radius, naf_sections, naf_specific
 # Initialise les sélections par défaut pour les filtres NAF et effectifs
 
 # --- SIDEBAR CONTENT ---
-with st.sidebar:
-    st.info(
-        "ℹ️ Les résultats de chaque nouvelle recherche sont ajoutés à la liste principale. "
-        "Vous pouvez gérer la visibilité de chaque recherche ci-dessous ou effacer toutes les données."
-    )
+#with st.sidebar:
+#    st.info(
+#        "ℹ️ Les résultats de chaque nouvelle recherche sont ajoutés à la liste principale. "
+#        "Vous pouvez gérer la visibilité de chaque recherche ci-dessous ou effacer toutes les données."
+#    )
     st.markdown("---")
 # si elles ne sont pas déjà présentes dans l'état de session.
 # --- TITRE ET DESCRIPTION (Toujours visible) ---
 st.title(
-    ":blue[Demande à Manu]*"
+    ":blue[Demande à Manu]* - prototype d'application"
+)
+
+st.markdown(
+    """
+    _(*) Je traverse la route et je vous trouve un travail !_ - Vous n'avez pas la réf. ? Revoyez la <a href="https://www.youtube.com/watch?v=FHMy6DhOXrI" target="_blank">vidéo</a> ou consultez la page <a href="https://fr.wikipedia.org/wiki/Je_traverse_la_rue_et_je_vous_trouve_un_travail" target="_blank">Wikipedia</a>.
+    """,
+    unsafe_allow_html=True
 )
 st.subheader(
-    "Application de recherche d'employeurs potentiels pour candidatures spontanées"
+    "Optimisez votre recherche d'emploi avec une gestion méthodique de vos candidatures spontanées !", divider=True
+)
+st.header(
+    ":violet[Etape n°1 - Rechercher des employeurs potentiels]"
 )
 
 st.markdown(
     """
     Trouvez des entreprises en fonction d'une adresse, d'un rayon, de secteurs d'activité (NAF) et de tranches d'effectifs salariés.\n  
-    _**(*) Je traverse la route et je vous trouve un travail !**_ Vous n'avez pas la réf. ? Revoyez la <a href="https://www.youtube.com/watch?v=FHMy6DhOXrI" target="_blank">vidéo</a> ou consultez la page <a href="https://fr.wikipedia.org/wiki/Je_traverse_la_rue_et_je_vous_trouve_un_travail" target="_blank">Wikipedia</a>.
     """,
     unsafe_allow_html=True
 )
 
 
-st.header("🔎 Paramètres de recherche")
+st.subheader("🔎 Paramètres de recherche")
 
 # --- Gestion état session pour les filtres de recherche ---
 if "selected_naf_letters" not in st.session_state:
@@ -577,6 +609,17 @@ with col_contenu_bouton:
     )
 
 st.markdown("---")
+st.header(":violet[Etape n°2 - Nettoyer, balayer, exporter vos résultats]")
+st.markdown(
+    """
+    (*) Vous n'avez pas la réf. ? Revoyez la <a href="https://www.youtube.com/watch?v=oAl64bUEZ8E&list=RDoAl64bUEZ8E&start_radio=1" target="_blank">vidéo</a>.
+    """,
+    unsafe_allow_html=True
+)
+st.info(
+        "ℹ️ Les résultats de chaque nouvelle recherche sont ajoutés à la liste principale. "
+        "Grâce à la barre latérale, vous avez la possibilité de gérer la visibilité de chaque recherche ou de supprimer l'ensemble des données en un seul clic."
+    )
 # --- ZONE D'AFFICHAGE DES RÉSULTATS ---
 results_container = st.container()
 
@@ -1674,6 +1717,24 @@ try:
     )
 except Exception as e:
     st.error(f"Erreur lors de la préparation du téléchargement ERM : {e}")
+
+st.markdown("---")
+st.header(":violet[Etape n°3 - Piloter vos candidatures: Vers l'infini et au-delà !*]")
+st.markdown(
+    """
+    (*) C'est pas possible, vous n'avez pas la réf. ? Revoyez la <a href="https://www.youtube.com/watch?v=hUxRkuL_LMU" target="_blank">vidéo</a>.
+    """,
+    unsafe_allow_html=True
+)
+st.subheader("Comprendre la structure du tableur")
+st.markdown("Ecrire tuto + video demo")
+st.subheader("Le parcours d'une candidature spontanée")
+st.markdown("Ecrire tuto + video demo")
+st.subheader("Et la carte des résultats ?")
+st.markdown("Ecrire tuto *Google My Maps*")
+
+
+
 st.markdown("---")
 st.markdown(" Propulsé avec les API Data Gouv : [API Recherche d’Entreprises](https://www.data.gouv.fr/fr/dataservices/api-recherche-dentreprises/), [API Découpage administratif](https://guides.data.gouv.fr/reutiliser-des-donnees/utiliser-les-api-geographiques/utiliser-lapi-decoupage-administratif) & [API Adresse](https://www.data.gouv.fr/fr/dataservices/api-adresse-base-adresse-nationale-ban/)")
 st.markdown("---")
