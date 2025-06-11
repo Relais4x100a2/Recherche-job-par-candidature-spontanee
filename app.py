@@ -11,6 +11,7 @@ import config
 import data_utils
 import geo_utils
 import llm_utils
+import rag_utils # For RAG integration
 
 # --- SCRIPT START LOG ---
 # print(f"{datetime.datetime.now()} - INFO - app.py script started.") # Optional: uncomment for runtime debugging
@@ -142,6 +143,15 @@ def save_global_erm_data(df_e, df_c, df_a, file_path=config.DEFAULT_ERM_FILE_PAT
 # --- INITIALISATION DE L'ÉTAT DE SESSION POUR L'AUTHENTIFICATION ET ERM ---
 # print(f"{datetime.datetime.now()} - INFO - Initializing session state variables.") # Optional: uncomment for runtime debugging
 # Initialisation des DataFrames ERM s'ils n'existent pas encore dans la session.
+
+# --- CHARGEMENT DES RESSOURCES RAG AU DÉMARRAGE DE L'APPLICATION ---
+# Grâce à st.cache_resource, ceci est rapide après le premier chargement.
+try:
+    rag_model, rag_index, rag_codes_map = rag_utils.load_rag_assets()
+except Exception as e:
+    st.error(f"Erreur critique lors du chargement des ressources RAG : {e}. L'assistance IA pour les codes NAF pourrait être dégradée.")
+    rag_model, rag_index, rag_codes_map = None, None, None
+
 if "df_entreprises_erm" not in st.session_state:
     st.session_state.df_entreprises_erm = pd.DataFrame(columns=config.ENTREPRISES_ERM_COLS).astype(config.ENTREPRISES_ERM_DTYPES)
 if "df_contacts_erm" not in st.session_state:
@@ -387,7 +397,10 @@ with col_gauche:
                 config.effectifs_groupes_details,
                 all_specific_naf_codes=all_naf_codes_list,
                 naf_detailed_lookup_for_libelles=data_utils.naf_detailed_lookup,
-                effectifs_tranches_map_for_summary=config.effectifs_tranches
+                effectifs_tranches_map_for_summary=config.effectifs_tranches,
+                rag_model=rag_model, # Pass RAG model
+                rag_index=rag_index, # Pass RAG index
+                rag_codes_map=rag_codes_map # Pass RAG codes map
             )
 
             if suggestions:
@@ -925,7 +938,7 @@ if st.session_state.get("breakdown_search_pending", False):
             for val in individual_naf_values:
                 naf_criteria_to_iterate.append({naf_param_key_used: val.strip()})
         else: # Single NAF value initially, or became single after some processing
-            naf_criteria_to_iterate.append({naf_param_key_used: naf_values_string})
+            naf_criteria_to_iterate.append({naf_param_key_used: naf_values_string_original})
     else: # No NAF filter in original query, or it was empty.
           # We'll run the original query with force_full_fetch=True.
           # This means no NAF key will be in naf_criterion_map for this iteration.

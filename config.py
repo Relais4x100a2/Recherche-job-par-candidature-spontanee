@@ -16,7 +16,7 @@ API_MAX_PAGES = API_MAX_TOTAL_RESULTS // API_RESULTS_PER_PAGE
 # --- File Paths ---
 # Defines paths for data files used by the application.
 DEFAULT_ERM_FILE_PATH = "erm_data.json"
-NAF_FILE_PATH = "NAF.csv"
+NAF_FILE_PATH = "data/NAF.csv"
 
 # --- ERM (Enterprise Relationship Management) DataFrame Column Definitions ---
 # Specifies the column structure for DataFrames used to store ERM data.

@@ -8,7 +8,7 @@ import json
 import os
 
 # Chemin où stocker le fichier cache des communes
-COMMUNES_CACHE_FILE = "communes_cache.json"
+COMMUNES_CACHE_FILE = "data/communes_cache.json"
 
 def geocoder_ban_france(adresse: str):
     """
